@@ -14,3 +14,5 @@ dotnet test --no-build
 Run the local server and Aspire 13.6.5 dashboard with `aspire run`. The server's
 assigned addresses appear in the dashboard. The console client runs in its
 own terminal.
+
+The standalone server's local HTTP launch profile uses `http://localhost:5187`.
