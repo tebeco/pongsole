@@ -1,0 +1,15 @@
+.git
+.github
+.aspire
+.vs
+worktrees
+**/bin
+**/obj
+**/TestResults
+**/artifacts
+**/.env
+**/.env.*
+**/secrets.json
+**/*.pfx
+**/*.p12
+**/*.key

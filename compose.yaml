@@ -1,0 +1,38 @@
+services:
+  server:
+    build: .
+    environment:
+      Pong__Mode: Private
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      PONGSOLE_SHARED_CODE: ${PONGSOLE_SHARED_CODE:?Set PONGSOLE_SHARED_CODE}
+      Pong__KnownProxies__0: 172.30.52.2
+    networks:
+      pongsole:
+        ipv4_address: 172.30.52.3
+  caddy:
+    image: caddy:2.11.9-alpine
+    depends_on:
+      - server
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      pongsole:
+        ipv4_address: 172.30.52.2
+
+networks:
+  pongsole:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.52.0/24
+
+volumes:
+  caddy_data:
+  caddy_config:
