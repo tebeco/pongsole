@@ -30,7 +30,9 @@ public static class ServiceDefaultsExtensions
                 .AddRuntimeInstrumentation())
             .WithTracing(tracing => tracing
                 .AddAspNetCoreInstrumentation(options => options.Filter = context =>
-                    context.Request.Path != "/health" && context.Request.Path != "/alive")
+                    context.Request.Path != "/health" && context.Request.Path != "/alive"
+                    // SignalR transport URLs can carry connection tokens.
+                    && !context.Request.Path.StartsWithSegments("/game"))
                 .AddHttpClientInstrumentation());
 
         if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))

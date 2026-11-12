@@ -5,3 +5,7 @@
 TestResults/
 artifacts/
 *.user
+
+.env
+.env.*
+!.env.example
