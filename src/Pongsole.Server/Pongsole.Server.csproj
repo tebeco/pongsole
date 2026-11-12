@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../Pongsole.Contracts/Pongsole.Contracts.csproj" />
+    <ProjectReference Include="../Pongsole.Core/Pongsole.Core.csproj" />
+    <ProjectReference Include="../Pongsole.ServiceDefaults/Pongsole.ServiceDefaults.csproj" />
+    <InternalsVisibleTo Include="Pongsole.Server.Tests" />
+  </ItemGroup>
+</Project>
