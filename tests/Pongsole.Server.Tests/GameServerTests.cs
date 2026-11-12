@@ -14,6 +14,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using Pongsole.Contracts;
+using Pongsole.Core;
 
 namespace Pongsole.Server.Tests;
 
@@ -25,12 +26,16 @@ public sealed class GameServerTests
     public async Task RealClientsSharePaddlesAndReceiveOrderedAuthoritativeSnapshots()
     {
         await using var server = new TestGameServer(IPAddress.Loopback);
-        using var ticks = server.StartTicks();
+        server.StartTicks();
         await using var first = server.Connect();
         await using var second = server.Connect();
         await using var third = server.Connect();
         var observed = new ConcurrentQueue<GameSnapshot>();
-        using var subscription = third.On<GameSnapshot>("Snapshot", observed.Enqueue);
+        var firstUpdates = new ConcurrentQueue<GameSnapshot>();
+        var secondUpdates = new ConcurrentQueue<GameSnapshot>();
+        using var firstSubscription = first.On<GameSnapshot>("Snapshot", firstUpdates.Enqueue);
+        using var secondSubscription = second.On<GameSnapshot>("Snapshot", secondUpdates.Enqueue);
+        using var thirdSubscription = third.On<GameSnapshot>("Snapshot", observed.Enqueue);
 
         await first.StartAsync().WaitAsync(Deadline);
         var alice = await Join(first, " Alice ");
@@ -60,10 +65,14 @@ public sealed class GameServerTests
         var ticksSeen = observed.Select(snapshot => snapshot.Arena.Tick).ToArray();
         Assert.True(ticksSeen.Zip(ticksSeen.Skip(1), (earlier, later) => earlier < later).All(increasing => increasing));
 
+        var goal = await SnapshotWith(observed, snapshot => snapshot.Arena.LeftScore + snapshot.Arena.RightScore > 0);
+        await SnapshotWith(firstUpdates, snapshot =>
+            snapshot.Arena.LeftScore == goal.Arena.LeftScore && snapshot.Arena.RightScore == goal.Arena.RightScore);
+        await SnapshotWith(secondUpdates, snapshot =>
+            snapshot.Arena.LeftScore == goal.Arena.LeftScore && snapshot.Arena.RightScore == goal.Arena.RightScore);
+
         await third.StopAsync().WaitAsync(Deadline);
         await second.StopAsync().WaitAsync(Deadline);
-        var firstUpdates = new ConcurrentQueue<GameSnapshot>();
-        using var firstSubscription = first.On<GameSnapshot>("Snapshot", firstUpdates.Enqueue);
         await SnapshotWith(firstUpdates, snapshot => snapshot.Players.Length == 1 && snapshot.Arena.Phase == Phase.Waiting);
     }
 
@@ -71,7 +80,7 @@ public sealed class GameServerTests
     public async Task RealClientsObserveResumeErrorsExpiryAndProcessedSequences()
     {
         await using var server = new TestGameServer(IPAddress.Loopback);
-        using var ticks = server.StartTicks();
+        server.StartTicks();
         await using var first = server.Connect();
         await using var second = server.Connect();
         await using var probe = server.Connect();
@@ -88,6 +97,7 @@ public sealed class GameServerTests
         await Marker("SESSION_ALREADY_CONNECTED", () => Join(probe, "Other", alice.ResumeToken));
         await Marker("NOT_JOINED", () => Push(probe, Direction.Up, 1));
         await Marker("INVALID_SEQUENCE", () => Push(first, Direction.Up, 0));
+        await Assert.ThrowsAsync<HubException>(() => first.InvokeAsync("Push", 0, 1L).WaitAsync(Deadline));
 
         await Join(second, "Bob");
         await SnapshotWith(observed, snapshot => snapshot.Arena.Phase != Phase.Waiting);
@@ -144,7 +154,7 @@ public sealed class GameServerTests
     {
         using var logs = new CapturedLogs();
         await using var server = new TestGameServer(IPAddress.Parse("192.0.2.4"), "Private", logs: logs);
-        using var ticks = server.StartTicks();
+        server.StartTicks();
         await using var client = server.Connect(https: true, code: "test-code");
         await client.StartAsync().WaitAsync(Deadline);
         var player = await Join(client, "Player");
@@ -156,12 +166,14 @@ public sealed class GameServerTests
         Assert.NotEmpty(logs.Messages);
         Assert.DoesNotContain(logs.Messages, line => line.Contains(player.ResumeToken, StringComparison.Ordinal));
         Assert.DoesNotContain(logs.Messages, line => line.Contains("test-code", StringComparison.Ordinal));
+        Assert.DoesNotContain(logs.Messages, line => line.Contains("/game?id=", StringComparison.Ordinal));
     }
 
     [Theory]
     [InlineData("Loopback", "127.0.0.1", false, null, null, false, HttpStatusCode.OK)]
     [InlineData("Loopback", "::ffff:127.0.0.1", false, null, null, false, HttpStatusCode.OK)]
     [InlineData("Loopback", "192.0.2.4", false, null, "127.0.0.1", false, HttpStatusCode.Forbidden)]
+    [InlineData("Loopback", "192.0.2.4", false, null, "127.0.0.1", true, HttpStatusCode.Forbidden)]
     [InlineData("Private", "127.0.0.1", true, null, null, false, HttpStatusCode.Unauthorized)]
     [InlineData("Private", "127.0.0.1", true, "wrong", null, false, HttpStatusCode.Forbidden)]
     [InlineData("Private", "127.0.0.1", false, "test-code", null, false, HttpStatusCode.Forbidden)]
@@ -235,7 +247,22 @@ public sealed class GameServerTests
             .AddJsonProtocol(options => GameJson.Configure(options.PayloadSerializerOptions))
             .Build();
 
-        internal TickPump StartTicks() => new(Services.GetRequiredService<GameCoordinator>());
+        private TickPump? ticks;
+
+        internal void StartTicks() => ticks = new TickPump(Services.GetRequiredService<GameCoordinator>());
+
+        public override async ValueTask DisposeAsync()
+        {
+            try
+            {
+                await base.DisposeAsync();
+            }
+            finally
+            {
+                if (ticks is not null)
+                    await ticks.DisposeAsync();
+            }
+        }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -246,10 +273,12 @@ public sealed class GameServerTests
                 ["Pong:KnownProxies:0"] = knownProxy ? "192.0.2.4" : null
             }.Where(pair => pair.Value is not null)));
             if (logs is not null)
-                builder.ConfigureLogging(logging => logging.SetMinimumLevel(LogLevel.Trace).AddProvider(logs));
+                builder.ConfigureLogging(logging => logging.ClearProviders().SetMinimumLevel(LogLevel.Trace).AddProvider(logs));
             builder.ConfigureTestServices(services =>
             {
                 services.RemoveAll<IHostedService>();
+                services.RemoveAll<GameEngine>();
+                services.AddSingleton(new GameEngine(1));
                 services.RemoveAll<TimeProvider>();
                 services.AddSingleton<TimeProvider>(Time);
                 services.AddSingleton<IStartupFilter>(new SetPeer(peer));
@@ -286,7 +315,7 @@ public sealed class GameServerTests
         }
     }
 
-    private sealed class TickPump : IDisposable
+    private sealed class TickPump : IAsyncDisposable
     {
         private readonly CancellationTokenSource cancellation = new();
         private readonly Task loop;
@@ -295,17 +324,17 @@ public sealed class GameServerTests
 
         private static async Task RunAsync(GameCoordinator coordinator, CancellationToken cancellation)
         {
-            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(12));
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(8));
             while (await timer.WaitForNextTickAsync(cancellation))
                 coordinator.Tick();
         }
 
-        public void Dispose()
+        public async ValueTask DisposeAsync()
         {
-            cancellation.Cancel();
+            await cancellation.CancelAsync();
             try
             {
-                loop.GetAwaiter().GetResult();
+                await loop;
             }
             catch (OperationCanceledException)
             {

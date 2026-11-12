@@ -13,6 +13,9 @@ builder.Configuration["ForwardedHeaders_Enabled"] = "false";
 builder.AddServiceDefaults();
 // Disable the SignalR dispatcher category because its diagnostics can include resume tokens.
 builder.Logging.AddFilter("Microsoft.AspNetCore.SignalR.Internal.DefaultHubDispatcher", LogLevel.None);
+// SignalR transport tokens also appear in request URLs and connection manager debug logs.
+builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+builder.Logging.AddFilter("Microsoft.AspNetCore.Http.Connections.Internal.HttpConnectionManager", LogLevel.Information);
 builder.Services.AddSignalR().AddJsonProtocol(options => GameJson.Configure(options.PayloadSerializerOptions));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(_ => new GameEngine(RandomNumberGenerator.GetInt32(int.MaxValue)));

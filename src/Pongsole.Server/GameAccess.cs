@@ -46,7 +46,7 @@ internal sealed class GameAccess
 
     internal void Apply(WebApplication app)
     {
-        if (forwarding is not null)
+        if (codeHash is not null && forwarding is not null)
             app.UseForwardedHeaders(forwarding);
 
         app.Use(async (context, next) =>
