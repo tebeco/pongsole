@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Pongsole.Contracts/Pongsole.Contracts.csproj" />
+    <InternalsVisibleTo Include="Pongsole.Core.Tests" />
+  </ItemGroup>
+</Project>

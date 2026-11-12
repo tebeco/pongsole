@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Pongsole.Contracts/Pongsole.Contracts.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+    <InternalsVisibleTo Include="Pongsole.Client.Tests" />
+  </ItemGroup>
+</Project>
