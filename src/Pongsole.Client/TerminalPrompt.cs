@@ -15,7 +15,7 @@ internal sealed class TerminalPrompt(ITerminal terminal, TimeProvider timeProvid
                 switch (key.Key)
                 {
                     case ConsoleKey.Escape:
-                        throw new OperationCanceledException();
+                        throw new ClientExit();
                     case ConsoleKey.Enter:
                         return value.ToString();
                     case ConsoleKey.Backspace when value.Length > 0:
@@ -42,6 +42,6 @@ internal sealed class TerminalPrompt(ITerminal terminal, TimeProvider timeProvid
         }
         while (await timer.WaitForNextTickAsync(cancellationToken));
 
-        throw new OperationCanceledException();
+        throw new ClientExit();
     }
 }

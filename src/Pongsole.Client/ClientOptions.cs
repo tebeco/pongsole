@@ -21,7 +21,7 @@ internal sealed record ClientOptions(Uri? Endpoint, string? Name)
                     endpoint = ParseEndpoint(value);
                     break;
                 case "--name" when name is null:
-                    name = ParseName(value);
+                    name = value.Trim();
                     break;
                 default:
                     throw new ArgumentException("Usage: Pongsole.Client [--server URL] [--name DISPLAYNAME]");
