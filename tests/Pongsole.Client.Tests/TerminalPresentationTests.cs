@@ -61,7 +61,7 @@ public sealed class TerminalPresentationTests
             [new BallState(1, 50, 15, 0, 0)], []);
 
         RosterPlayer[] players = [new("One", Team.Left), new("Two", Team.Left), new("Three", Team.Right)];
-        var lines = GameRenderer.Draw(80, 24, arena, players, Team.Left, "Connected");
+        var lines = GameRenderer.Draw(80, 24, arena, players, Team.Left, "Connected").Lines;
         var board = lines.Skip(3).TakeWhile(line => line.Length >= 59).Select(line => line.Substring(20, 39)).Where(line => line.StartsWith('|')).ToArray();
 
         Assert.All(lines, line => Assert.True(line.Length < 80));
@@ -69,8 +69,8 @@ public sealed class TerminalPresentationTests
         Assert.InRange(board[0].Length / (2.0 * board.Length), 3.0, 3.6);
         Assert.Contains(board, row => row.Contains('o'));
         Assert.Contains("LEFT 2  -  1 RIGHT   |   Players 3   |   Team Left", lines);
-        Assert.Contains("Serving in 1.0s", lines);
-        Assert.Contains("Resize to 80x24", GameRenderer.Draw(79, 24, arena, players, Team.Left, "Connected")[0]);
+        Assert.Contains(lines, line => line.StartsWith("Serving in 1.0s"));
+        Assert.Contains("Resize to 80x24", GameRenderer.Draw(79, 24, arena, players, Team.Left, "Connected").Lines[0]);
         Assert.False(GameRenderer.Fits(80, 23));
     }
 
@@ -100,7 +100,7 @@ public sealed class TerminalPresentationTests
         var arena = SnapshotHistoryTests.Snapshot(0, 50, []).Arena;
         var players = new List<RosterPlayer> { new("Zed1234567", Team.Left, Up: true, LatencyMilliseconds: 2000), new("Right1", Team.Right, Down: true, LatencyMilliseconds: 0) };
         players.AddRange(Enumerable.Range(1, 16).Select(index => new RosterPlayer($"Left{index}", Team.Left)));
-        var lines = GameRenderer.Draw(80, 24, arena, players, Team.Right, "Connected");
+        var lines = GameRenderer.Draw(80, 24, arena, players, Team.Right, "Connected").Lines;
 
         Assert.StartsWith("LEFT TEAM", lines[3]);
         Assert.Equal("RIGHT TEAM", lines[3][60..].TrimEnd());
@@ -108,7 +108,7 @@ public sealed class TerminalPresentationTests
         Assert.Equal("Right1 (0ms)", lines[4][60..].TrimEnd());
         Assert.EndsWith("[^] v ", lines[5][..19]);
         Assert.EndsWith(" ^ [v]", lines[5]);
-        Assert.StartsWith("Left1 (—)", lines[6]);
+        Assert.StartsWith("Left1 (-)", lines[6]);
         Assert.StartsWith("Left6 ", lines[16]);
         Assert.StartsWith("+10 more", lines[18]);
         Assert.DoesNotContain(lines, line => line.StartsWith("Left7 "));
@@ -123,7 +123,7 @@ public sealed class TerminalPresentationTests
                 new BallState(3, 50, 15, 0, 0), new BallState(4, 50, 15, 0, 0)]
         };
 
-        var lines = GameRenderer.Draw(80, 24, arena, [], Team.Left, "Connected");
+        var lines = GameRenderer.Draw(80, 24, arena, [], Team.Left, "Connected").Lines;
         Assert.Equal(3, lines.Sum(line => line.Length >= 61 ? line.Substring(18, 43).Count(cell => cell == 'o') : 0));
         Assert.All(lines, line => Assert.True(line.Length <= 79));
     }
@@ -139,7 +139,7 @@ public sealed class TerminalPresentationTests
             Pickups = [new PickupState(1, 100, 30, amount, remainingTicks)]
         };
 
-        var lines = GameRenderer.Draw(80, 24, arena, [], Team.Right, "Connected");
+        var lines = GameRenderer.Draw(80, 24, arena, [], Team.Right, "Connected").Lines;
         var markerRow = Array.FindIndex(lines, line => line.Contains($"+{amount}|"));
         Assert.True(markerRow >= 0);
         Assert.Contains(seconds + "|", lines[markerRow + 1]);

@@ -59,6 +59,7 @@ if (builder.ExecutionContext.IsRunMode)
         builder.AddProject<Projects.Pongsole_Client>(resourceName)
             .WithArgs("--server", serverEndpoint, "--name", playerName)
             .WithEnvironment("PONGSOLE_SHARED_CODE", gameCode)
+            .WithEnvironment("PONGSOLE_DASHBOARD_TERMINAL", "1")
             .WaitFor(server)
             .WithExplicitStart()
             .WithTerminal(options =>

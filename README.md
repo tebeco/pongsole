@@ -43,6 +43,9 @@ Browser and terminal players share the same arena and scores. Use **W/S** or
 **↑/↓** to move, or press and hold **Up/Down** on the browser's touch controls.
 Select **Leave game** in the browser or press **Q/Esc** in the terminal to leave.
 In the browser, **Play again** joins with another randomly selected nickname.
+The terminal game uses Spectre.Console for live rendering, with colored team
+paddles and rosters, latency indicators, and brief score and new-ball effects.
+Terminals without Unicode or color still show the game with plain glyphs.
 Use a terminal at least **80×24**. A smaller terminal shows a resize prompt and
 pauses movement input. If you omit either terminal option, the client prompts
 for it.

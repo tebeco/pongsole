@@ -32,13 +32,16 @@ internal sealed class TerminalPrompt(ITerminal terminal, TimeProvider timeProvid
             }
 
             var text = masked ? new string('*', value.Length) : value.ToString();
-            var available = Math.Max(0, terminal.Size.Width - 1);
+            var (width, height) = terminal.Size;
+            var available = Math.Max(0, width - 3);
             if (text.Length > available)
             {
-                text = text[^available..];
+                var offset = text.Length - available;
+                if (offset < text.Length && char.IsLowSurrogate(text[offset])) offset++;
+                text = text[offset..];
             }
 
-            terminal.Draw([label, "> " + text, "Enter to continue, Esc to quit"]);
+            terminal.Draw(ScreenFrame.Plain(width, height, label, "> " + text, "Enter to continue, Esc to quit"));
         }
         while (await timer.WaitForNextTickAsync(cancellationToken));
 

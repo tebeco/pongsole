@@ -22,7 +22,11 @@ internal sealed class ClientApplication(
             throw new ClientFailure("Pongsole needs an interactive terminal with keyboard input and screen output.");
         }
 
-        using var screen = terminal.Begin();
+        await terminal.RunScreenAsync(() => RunScreenAsync(options, sharedCode, cancellationToken));
+    }
+
+    private async Task RunScreenAsync(ClientOptions options, string? sharedCode, CancellationToken cancellationToken)
+    {
         try
         {
             var endpoint = options.Endpoint ?? await PromptUntilValidAsync("Server URL", ClientOptions.ParseEndpoint, cancellationToken);
@@ -150,6 +154,7 @@ internal sealed class ClientApplication(
     {
         using var timer = new PeriodicTimer(FrameInterval, clock);
         var input = new ConsoleInputState(clock, connection, player);
+        var effects = new PresentationEffects(clock);
         try
         {
             do
@@ -161,7 +166,9 @@ internal sealed class ClientApplication(
 
                 var (width, height) = terminal.Size;
                 var canMove = GameRenderer.Fits(width, height) && view.Arena?.Phase is Phase.Serving or Phase.Playing;
-                terminal.Draw(GameRenderer.Draw(width, height, view.Arena, view.Players, player.Team, "Connected"));
+                effects.Observe(view.Arena);
+                terminal.Draw(GameRenderer.Draw(width, height, view.Arena, view.Players, player.Team, "Connected",
+                    terminal.Unicode, terminal.Color, effects));
                 Direction? latest = null;
                 while (terminal.ReadKey() is { } key)
                 {
@@ -189,7 +196,7 @@ internal sealed class ClientApplication(
             DiscardKeys();
             var view = history.Read(showActivity: false);
             var (width, height) = terminal.Size;
-            terminal.Draw(GameRenderer.Draw(width, height, view.Arena, view.Players, team, status));
+            terminal.Draw(GameRenderer.Draw(width, height, view.Arena, view.Players, team, status, terminal.Unicode, terminal.Color));
             if (task.IsCompleted)
             {
                 break;
