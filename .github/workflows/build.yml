@@ -28,6 +28,7 @@ jobs:
           package-manager-cache: false
       - run: npm ci --ignore-scripts
       - run: node scripts/vendor-signalr.mjs --check
+      - run: node scripts/check-native-rtc.mjs
       - run: node --test "tests/Pongsole.Browser.Tests/*.test.mjs"
       - run: dotnet restore Pongsole.slnx
       - run: dotnet build Pongsole.slnx --configuration Release --no-restore

@@ -1,0 +1,12 @@
+<Project>
+  <ItemGroup>
+    <Content Include="$(MSBuildThisFileDirectory)native/libdatachannel/win-x64/datachannel.dll"
+             Link="runtimes/win-x64/native/datachannel.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)native/libdatachannel/linux-x64/libdatachannel.so"
+             Link="runtimes/linux-x64/native/libdatachannel.so" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)native/libdatachannel/linux-arm64/libdatachannel.so"
+             Link="runtimes/linux-arm64/native/libdatachannel.so" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)native/libdatachannel/licenses/*"
+             Link="licenses/libdatachannel/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

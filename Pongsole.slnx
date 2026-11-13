@@ -5,6 +5,7 @@
     <Project Path="src/Pongsole.Contracts/Pongsole.Contracts.csproj" />
     <Project Path="src/Pongsole.Core/Pongsole.Core.csproj" />
     <Project Path="src/Pongsole.Server/Pongsole.Server.csproj" />
+    <Project Path="src/Pongsole.Transport/Pongsole.Transport.csproj" />
     <Project Path="src/Pongsole.Tunnel/Pongsole.Tunnel.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -12,6 +13,7 @@
     <Project Path="tests/Pongsole.Client.Tests/Pongsole.Client.Tests.csproj" />
     <Project Path="tests/Pongsole.Core.Tests/Pongsole.Core.Tests.csproj" />
     <Project Path="tests/Pongsole.Server.Tests/Pongsole.Server.Tests.csproj" />
+    <Project Path="tests/Pongsole.Transport.Tests/Pongsole.Transport.Tests.csproj" />
     <Project Path="tests/Pongsole.Tunnel.Tests/Pongsole.Tunnel.Tests.csproj" />
   </Folder>
 </Solution>

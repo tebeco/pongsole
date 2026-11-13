@@ -1,0 +1,9 @@
+{
+  "upstreamTag": "v0.24.6",
+  "upstreamCommit": "6b1e2e620f1e37f0eafeee702eaea0043cb305fd",
+  "assets": {
+    "win-x64/datachannel.dll": "803c4d12ac2b2d84391794a69861f084c4b5a02075090edf18b65f04b71e1b59",
+    "linux-x64/libdatachannel.so": "e39a7bfd69c3a198aa29d632bce83a06ed11c4f6ce8e4b4a882aa608aa123118",
+    "linux-arm64/libdatachannel.so": "5b0f4f8d1a8a0d07173f4a81f560079b5b16dc96009a1e7ee355f74d4eba3942"
+  }
+}
