@@ -5,7 +5,7 @@ import { AccessError } from "../../src/Pongsole.Server/wwwroot/transport.mjs";
 import { deferred, FakeClock, flush } from "./test-support.mjs";
 
 const snapshot = (tick, sequence = 0, playerId = "one", phase = "playing") => ({
-  arena: { tick, phase, leftScore: 0, rightScore: 0, leftPaddle: { y: 15 }, rightPaddle: { y: 15 }, ball: { x: 50, y: 15 } },
+  arena: { tick, phase, leftScore: 0, rightScore: 0, leftPaddle: { y: 15 }, rightPaddle: { y: 15 }, balls: [{ id: 1, x: 50, y: 15, velocityX: 0, velocityY: 0 }] },
   players: [{ playerId, lastProcessedSequence: sequence }],
 });
 const player = (tick, sequence = 0, playerId = "one") => ({

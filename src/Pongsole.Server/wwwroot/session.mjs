@@ -163,7 +163,7 @@ export class GameSession {
       if (join.playerId !== this.player?.playerId) this.lastSequence = 0;
       this.lastSequence = Math.max(this.lastSequence, join.lastProcessedSequence);
       this.player = { playerId: join.playerId, team: join.team, resumeToken: join.resumeToken };
-      this.history = new ArenaSnapshots();
+      this.history = new ArenaSnapshots(join.playerId);
       joined = true;
       this.#accept(join.snapshot);
       if (early) this.#accept(early);

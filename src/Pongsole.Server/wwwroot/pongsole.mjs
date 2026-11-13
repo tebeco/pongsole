@@ -106,7 +106,10 @@ function queueFrame() {
     frameId = undefined;
     const interpolated = session.state === "playing" && !reduceMotion.matches;
     drawArena(arena, session.history.frame(now, !interpolated));
-    if (interpolated && now - session.history.receivedAt < 50) queueFrame();
+    if (interpolated) {
+      const playing = session.history.newest?.arena.phase === "playing";
+      if (now - session.history.receivedAt < (playing ? 250 : 50)) queueFrame();
+    }
   });
 }
 

@@ -30,17 +30,18 @@ public sealed class SnapshotHistoryTests
         var player = new PlayerState(Guid.NewGuid(), "Player", Team.Right, 0);
         history.EstablishBaseline(new JoinResult(player.PlayerId, player.Team, "token", 0, Snapshot(7, 50, [player])));
 
-        history.Accept(Snapshot(10, 54, [player]));
+        var next = Snapshot(10, 54, [player]);
+        history.Accept(next with { Arena = next.Arena with { LeftPaddle = new PaddleState(19, 0) } });
         clock.Advance(TimeSpan.FromMilliseconds(25));
         Assert.Equal(10, history.Read().Arena!.Tick);
-        Assert.Equal(52, history.Read().Arena!.Ball.X);
+        Assert.Equal(17, history.Read().Arena!.LeftPaddle.Y);
         clock.Advance(TimeSpan.FromMilliseconds(50));
-        Assert.Equal(54, history.Read().Arena!.Ball.X);
+        Assert.Equal(19, history.Read().Arena!.LeftPaddle.Y);
 
         var serve = Snapshot(11, 50, [player]);
         history.Accept(serve with { Arena = serve.Arena with { Phase = Phase.Serving } });
         Assert.Equal(Phase.Serving, history.Read().Arena!.Phase);
-        Assert.Equal(50, history.Read().Arena!.Ball.X);
+        Assert.Equal(50, history.Read().Arena!.Balls[0].X);
     }
 
     [Fact]
@@ -89,5 +90,5 @@ public sealed class SnapshotHistoryTests
 
     internal static GameSnapshot Snapshot(long tick, double x, System.Collections.Immutable.ImmutableArray<PlayerState> players) =>
         new(new ArenaState(tick, 0, 0, Phase.Playing, 0, new PaddleState(15, 0), new PaddleState(15, 0),
-            new BallState(x, 15, 24, 0)), players);
+            [new BallState(1, x, 15, 0, 0)], []), players);
 }

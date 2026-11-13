@@ -29,9 +29,17 @@ internal static class GameRenderer
             (int)((contentHeight - 2) * (200.0 / 30)));
         var boardHeight = (int)Math.Round(boardWidth * (30.0 / 200));
         var rows = Enumerable.Range(0, boardHeight).Select(_ => new string(' ', boardWidth).ToCharArray()).ToArray();
+        foreach (var pickup in arena.Pickups)
+        {
+            DrawPickup(rows, pickup);
+        }
+
         DrawPaddle(rows, 2, arena.LeftPaddle.Y);
         DrawPaddle(rows, 98, arena.RightPaddle.Y);
-        rows[Scale(arena.Ball.Y, 30, boardHeight)][Scale(arena.Ball.X, 100, boardWidth)] = 'o';
+        foreach (var ball in arena.Balls)
+        {
+            rows[Scale(ball.Y, 30, boardHeight)][Scale(ball.X, 100, boardWidth)] = 'o';
+        }
 
         var phase = arena.Phase switch
         {
@@ -88,6 +96,20 @@ internal static class GameRenderer
         }
 
         return lines;
+    }
+
+    private static void DrawPickup(char[][] rows, PickupState pickup)
+    {
+        var column = Scale(pickup.X, 100, rows[0].Length);
+        var row = Math.Min(Scale(pickup.Y, 30, rows.Length), rows.Length - 2);
+        DrawLabel(rows[row], column, FormattableString.Invariant($"+{pickup.Amount}"));
+        DrawLabel(rows[row + 1], column, FormattableString.Invariant($"{Math.Ceiling(pickup.RemainingTicks / 60.0)}s"));
+    }
+
+    private static void DrawLabel(char[] row, int center, string label)
+    {
+        var start = Math.Clamp(center - label.Length / 2, 0, row.Length - label.Length);
+        label.CopyTo(0, row, start, label.Length);
     }
 
     private static void DrawPaddle(char[][] rows, double x, double y)

@@ -14,8 +14,13 @@ In a browser, holding a key or touch button repeats movement on the server after
 the initial input arrives. Releasing stops those repeats. Terminal controls use
 individual keypresses. Each player can apply up to 10 movement impulses per
 second. Paddle movement still slows over time and has a speed cap.
-The game serves when both teams have a player and keeps score until the server
-stops.
+The game serves one ball when both teams have a player. Every five seconds of
+active play, a pickup appears with a random value from +1 to +10 and a
+60-second countdown. A ball that hits a pickup adds that many balls, up to ten
+in the arena. Each ball scores separately, and the next serve starts once all
+balls have scored. Scores persist until the server stops. Both clients project each ball between updates
+using half of the local player's measured round-trip time as a delay estimate.
+The server decides paddle bounces and goals.
 
 ## Play locally
 

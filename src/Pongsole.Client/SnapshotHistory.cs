@@ -7,6 +7,7 @@ internal sealed class SnapshotHistory(TimeProvider clock)
     private static readonly TimeSpan SnapshotInterval = TimeSpan.FromMilliseconds(50);
     private readonly object gate = new();
     private readonly RosterActivity activity = new(clock);
+    private readonly BallPrediction prediction = new(clock);
     private GameSnapshot? earlySnapshot;
     private GameSnapshot? newest;
     private ArenaState? previousArena;
@@ -53,15 +54,18 @@ internal sealed class SnapshotHistory(TimeProvider clock)
             return;
         }
 
+        var now = clock.GetTimestamp();
         if (newest?.Arena.Tick != snapshot.Arena.Tick)
         {
             previousArena = newest?.Arena;
-            newestTimestamp = clock.GetTimestamp();
+            newestTimestamp = now;
+            var latency = snapshot.Players.FirstOrDefault(player => player.PlayerId == playerId)?.LatencyMilliseconds;
+            prediction.Accept(snapshot.Arena, latency, now,
+                seedActivity || previousArena?.Phase != snapshot.Arena.Phase);
         }
 
-        var now = clock.GetTimestamp();
         activity.Accept(snapshot, now, seedActivity || snapshot.Arena.Phase == Phase.Waiting);
-        newest = snapshot;
+        newest = newest?.Arena.Tick == snapshot.Arena.Tick ? snapshot with { Arena = newest.Arena } : snapshot;
         foreach (var player in snapshot.Players)
         {
             if (player.PlayerId == playerId)
@@ -94,28 +98,25 @@ internal sealed class SnapshotHistory(TimeProvider clock)
 
             var timestamp = clock.GetTimestamp();
             var players = newest.Players.Select(player => activity.Read(player, timestamp, showActivity)).ToArray();
-            return (Interpolate(newest.Arena), players, lastProcessed);
+            return (Present(newest.Arena, timestamp), players, lastProcessed);
         }
     }
 
-    private ArenaState Interpolate(ArenaState arena)
+    private ArenaState Present(ArenaState arena, long timestamp)
     {
+        var balls = prediction.Read(arena, timestamp);
         if (previousArena is not { } previous || arena.Phase == Phase.Waiting || arena.Phase != previous.Phase
             || arena.LeftScore != previous.LeftScore || arena.RightScore != previous.RightScore)
         {
-            return arena;
+            return arena with { Balls = balls };
         }
 
-        var fraction = Math.Clamp(clock.GetElapsedTime(newestTimestamp) / SnapshotInterval, 0, 1);
+        var fraction = Math.Clamp(clock.GetElapsedTime(newestTimestamp, timestamp) / SnapshotInterval, 0, 1);
         return arena with
         {
             LeftPaddle = arena.LeftPaddle with { Y = Lerp(previous.LeftPaddle.Y, arena.LeftPaddle.Y, fraction) },
             RightPaddle = arena.RightPaddle with { Y = Lerp(previous.RightPaddle.Y, arena.RightPaddle.Y, fraction) },
-            Ball = arena.Ball with
-            {
-                X = Lerp(previous.Ball.X, arena.Ball.X, fraction),
-                Y = Lerp(previous.Ball.Y, arena.Ball.Y, fraction)
-            }
+            Balls = balls
         };
     }
 
