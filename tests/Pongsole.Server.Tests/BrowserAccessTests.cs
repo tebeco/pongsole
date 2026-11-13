@@ -210,6 +210,63 @@ public sealed class BrowserAccessTests
         }
     }
 
+    [Theory]
+    [InlineData(true, "https")]
+    [InlineData(false, "http")]
+    public async Task HomepageMetadataUsesRequestHostAndTrustedForwardedScheme(bool trusted, string scheme)
+    {
+        var token = TestContext.Current.CancellationToken;
+        await using var app = new BrowserServer(peer: trusted ? "192.0.2.4" : "192.0.2.5", proxy: "192.0.2.4");
+        using var client = app.Client("http://pong.example:8181");
+        client.DefaultRequestHeaders.Add("X-Forwarded-Proto", "https");
+        client.DefaultRequestHeaders.Add("X-Forwarded-Host", "other.example");
+        client.DefaultRequestHeaders.Add("X-Forwarded-For", "192.0.2.6");
+
+        using var root = await client.GetAsync("/?code=not-in-metadata", token);
+        using var index = await client.GetAsync("/index.html", token);
+        AssertStatus(root, HttpStatusCode.OK);
+        AssertStatus(index, HttpStatusCode.OK);
+        Assert.Equal("text/html; charset=utf-8", root.Content.Headers.ContentType?.ToString());
+        Assert.True(root.Headers.CacheControl?.NoStore);
+        var html = await root.Content.ReadAsStringAsync(token);
+        Assert.Equal(html, await index.Content.ReadAsStringAsync(token));
+        Assert.Contains("<meta property=\"og:title\" content=\"Pongsole\">", html);
+        Assert.Contains($"<meta property=\"og:url\" content=\"{scheme}://pong.example:8181/\">", html);
+        Assert.Contains($"<meta property=\"og:image\" content=\"{scheme}://pong.example:8181/images/pongsole-preview.gif\">", html);
+        Assert.Contains("<meta property=\"og:image:type\" content=\"image/gif\">", html);
+        Assert.Contains("<meta property=\"og:image:width\" content=\"1864\">", html);
+        Assert.Contains("<meta property=\"og:image:height\" content=\"726\">", html);
+        Assert.Contains("<meta name=\"twitter:card\" content=\"summary_large_image\">", html);
+        Assert.Contains("src=\"/pongsole.mjs\"", html);
+        Assert.DoesNotContain("not-in-metadata", html);
+        Assert.DoesNotContain("other.example", html);
+        Assert.DoesNotContain(Code, html);
+
+        using var headRequest = new HttpRequestMessage(HttpMethod.Head, "/index.html");
+        using var head = await client.SendAsync(headRequest, token);
+        AssertStatus(head, HttpStatusCode.OK);
+        Assert.Equal(index.Content.Headers.ContentLength, head.Content.Headers.ContentLength);
+        Assert.Equal(index.Content.Headers.ContentType, head.Content.Headers.ContentType);
+        Assert.Empty(await head.Content.ReadAsByteArrayAsync(token));
+    }
+
+    [Fact]
+    public async Task SuppliedGifIsPublicAndByteExactInPrivateMode()
+    {
+        var token = TestContext.Current.CancellationToken;
+        await using var app = new BrowserServer();
+        using var client = app.Client(PrivateOrigin);
+        using var response = await client.GetAsync("/images/pongsole-preview.gif", token);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("image/gif", response.Content.Headers.ContentType?.MediaType);
+        var bytes = await response.Content.ReadAsByteArrayAsync(token);
+        Assert.Equal(10_416_529, bytes.Length);
+        Assert.Equal("75D7DC53FD6A8D005ADFED9DCFBC3AF0A705079588357E02A855F73F661E9FFE",
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)));
+        await AssertSession(client, "private", false);
+    }
+
+
     [Fact]
     public async Task BrowserCookieAdmitsWebSocketAndJoinsSharedGame()
     {

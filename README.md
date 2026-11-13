@@ -100,6 +100,9 @@ Select **Stop** on `cloudflared` to close public access while keeping the
 local game running. Restarting the tunnel creates a new URL. Use the latest invite after the tunnel
 or access code changes.
 
+The public homepage includes the Pongsole gameplay GIF as link-preview metadata.
+Discord controls how the preview appears and may cache it.
+
 Cloudflare Quick Tunnels are temporary development links. They require no
 account or domain, support up to 200 in-flight requests, and do not support
 Server-Sent Events. Pongsole's browser client uses WebSockets.
