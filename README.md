@@ -1,6 +1,6 @@
 # Pongsole
 
-Pongsole is multiplayer Pong in the terminal. Everyone on a team controls the
+Pongsole is multiplayer Pong in your browser or terminal. Everyone on a team controls the
 same paddle. New players join the smaller team, with ties decided randomly.
 The game serves when both teams have a player and keeps score until the server
 stops.
@@ -14,22 +14,24 @@ root, start the server:
 dotnet run --project src/Pongsole.Server --launch-profile http
 ```
 
-Start a client in each of two separate interactive terminals. Start a third to
-see two players share a paddle.
+Open [http://localhost:5187](http://localhost:5187) in your browser, enter a
+display name, and join. Open another browser tab or join from an interactive
+terminal to start a match. A third player shares one team's paddle.
 
 ```sh
-dotnet run --project src/Pongsole.Client -- --server http://localhost:5187 --name Alice
 dotnet run --project src/Pongsole.Client -- --server http://localhost:5187 --name Bob
-dotnet run --project src/Pongsole.Client -- --server http://localhost:5187 --name Charlie
 ```
 
-Run each line in its own terminal. If you omit `--server` or `--name`, the client
-prompts for it. Pass the server origin and the client connects to `/game`.
+Browser and terminal players share the same arena and scores. Use **W/S** or
+**↑/↓** to move, or press and hold **Up/Down** on the browser's touch controls.
+Select **Leave** in the browser or press **Q/Esc** in the terminal to leave.
+Use a terminal at least **80×24**. A smaller terminal shows a resize prompt and
+pauses movement input. If you omit either terminal option, the client prompts
+for it.
 
-Use **W/S** or **↑/↓** to move and **Q/Esc** to exit. Use a terminal at least
-**80×24**. A smaller terminal shows a resize prompt and pauses movement input.
-A disconnected player has 60 seconds to resume the same session while the server
-remains running. The client resumes automatically after a connection drop.
+Clients retry after a connection drop. A player can resume the same session
+within 60 seconds while the server stays running. Reloading the browser page
+or selecting **Leave** clears that tab's player session.
 
 The server defaults to Loopback mode and accepts connections from the same
 machine without a code. Stop the server with **Ctrl+C**.
@@ -42,8 +44,9 @@ With the Aspire CLI installed, run this from the repository root:
 aspire run --apphost src/Pongsole.AppHost/Pongsole.AppHost.csproj
 ```
 
-The dashboard shows the assigned HTTP and HTTPS addresses of the `server`
-resource. Use its HTTP origin with `--server` in each client terminal. Stop the
+In the Aspire dashboard, select **Play Pongsole** under the `server` resource
+to open the browser game. Use the same HTTP origin with `--server` to join
+from a terminal. Stop the
 foreground AppHost with **Ctrl+C**.
 
 ## Host a private game over HTTPS
@@ -66,13 +69,16 @@ a hostname you control, and a shared code you choose.
    docker compose up --build -d
    ```
 
-4. Players connect to the HTTPS origin, for example:
+4. Open your HTTPS origin in a browser, enter your display name and the shared
+   code, and join. A browser session can keep access across tabs and page
+   reloads while its access cookie is valid. If access expires, enter the
+   code again. Terminal players use the same HTTPS origin:
 
    ```sh
    dotnet run --project src/Pongsole.Client -- --server https://pong.example.com --name Alice
    ```
 
-   The client prompts for the code without echoing it unless
+   The terminal client prompts for the code without echoing it unless
    `PONGSOLE_SHARED_CODE` is already set in the client's environment. Private
    mode requires the code even on localhost.
 
@@ -85,7 +91,7 @@ For a different reverse proxy, set `Pong__Mode=Private`, provide
 proxy's IP address. The proxy must support WebSockets and forward the original
 HTTPS scheme. The example trusts only Caddy at `172.30.52.2`. Use an unused
 subnet and update the Compose network and trusted IP together if needed. Clients
-validate the server certificate. The code travels in the `X-Pong-Code` header.
+validate the server certificate. The browser page and its WebSocket connection use the same HTTPS origin.
 
 ## Build and test
 
@@ -95,5 +101,15 @@ dotnet build Pongsole.slnx --no-restore
 dotnet test Pongsole.slnx --no-build
 ```
 
-The GitHub Actions workflow runs these checks in Release on Windows, Linux, and
-macOS.
+The .NET build, publish, and server runtime use the checked-in browser assets.
+To verify the vendored SignalR files and run the browser unit tests, use Node.js
+26 with npm:
+
+```sh
+npm ci --ignore-scripts
+node scripts/vendor-signalr.mjs --check
+node --test "tests/Pongsole.Browser.Tests/*.test.mjs"
+```
+
+The GitHub Actions workflow runs the .NET and browser checks on Windows, Linux,
+and macOS.

@@ -22,6 +22,13 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts
+      - run: node scripts/vendor-signalr.mjs --check
+      - run: node --test "tests/Pongsole.Browser.Tests/*.test.mjs"
       - run: dotnet restore Pongsole.slnx
       - run: dotnet build Pongsole.slnx --configuration Release --no-restore
       - run: dotnet test Pongsole.slnx --configuration Release --no-build --logger trx --results-directory TestResults
