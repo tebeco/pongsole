@@ -13,7 +13,7 @@
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 250px; }
 [hidden] { display: none !important; }
-button, input { font: inherit; }
+button { font: inherit; }
 
 .cabinet {
   width: min(1800px, 100%);
@@ -111,48 +111,13 @@ canvas { display: block; width: 100%; aspect-ratio: 100 / 30; }
 .team-label[data-team="left"] { color: var(--left); }
 .team-label[data-team="right"] { color: var(--right); }
 
-.game-controls form {
-  display: grid;
-  grid-template-columns: 6rem minmax(0, 16rem);
-  align-items: center;
-  gap: .5rem;
-  flex: 0 1 22.5rem;
-  min-width: 0;
-  max-width: 100%;
-}
-.send-field { position: relative; min-width: 0; }
-.send-field input { padding-inline-end: 3rem; }
-.send-field button {
-  position: absolute;
-  inset: 0 0 0 auto;
-  display: grid;
-  place-items: center;
-  width: 44px;
-  min-height: 44px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-}
-.send-field button:hover:not(:disabled) { color: var(--left); background: transparent; }
-.send-field button:focus-visible { outline-offset: -4px; }
-.send-field svg {
-  width: 1.15rem;
-  height: 1.15rem;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-label, #message { font-size: .9rem; }
-#message { color: var(--muted); flex-basis: 100%; }
+#message { font-size: .9rem; color: var(--muted); flex-basis: 100%; }
 #message:empty { display: none; }
-input, button { min-height: 2.75rem; border: 1px solid var(--line); border-radius: .5rem; }
-input { width: 100%; padding: .65rem; color: inherit; background: #080e19; }
+button { min-height: 2.75rem; border: 1px solid var(--line); border-radius: .5rem; }
 button { background: #1b293e; color: #eef4ff; padding: .6rem .85rem; font-weight: 700; cursor: pointer; }
 button:hover:not(:disabled) { background: #263951; }
 button:disabled { opacity: .55; cursor: default; }
-button:focus-visible, input:focus-visible { outline: 3px solid var(--left); outline-offset: 3px; }
+button:focus-visible { outline: 3px solid var(--left); outline-offset: 3px; }
 .key-help { font-size: .8rem; }
 kbd { color: #fff; }
 #play-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem 1rem; }

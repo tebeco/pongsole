@@ -2,6 +2,7 @@ import { nameRule, validName } from "./roster.mjs";
 import { ArenaSnapshots } from "./arena.mjs";
 import { AccessError } from "./transport.mjs";
 
+const inviteRequired = "Open a valid invite link to join this game.";
 const retryDelays = [0, 2_000, 5_000, 10_000];
 const marker = error => String(error?.message ?? "").match(/\bPONGSOLE_[A-Z_]+\b/)?.[0];
 const resumeRejected = error => ["PONGSOLE_INVALID_RESUME_TOKEN", "PONGSOLE_EXPIRED_RESUME_TOKEN"].includes(marker(error));
@@ -78,7 +79,7 @@ export class GameSession {
       const grant = await this.access(next.abort.signal);
       if (!this.#isCurrent(next)) return;
       if (!grant.authorized) {
-        this.#show("access");
+        this.#show("access", inviteRequired);
       } else if (this.name) {
         await this.#connect(next);
       } else {
@@ -86,10 +87,8 @@ export class GameSession {
       }
     } catch (error) {
       if (!this.#isCurrent(next)) return;
-      if (error instanceof AccessError && [401, 403].includes(error.status) && code !== undefined) {
-        this.#show("access", "Check the shared code and try again.");
-      } else if (error instanceof AccessError && error.status === 403) {
-        this.#show("unavailable", "Access denied. Private games require HTTPS.");
+      if (error instanceof AccessError && [401, 403].includes(error.status)) {
+        this.#show("access", inviteRequired);
       } else if (this.name) {
         this.#schedule(next, "Connection unavailable. Reconnecting…");
       } else {
@@ -98,14 +97,14 @@ export class GameSession {
     }
   }
 
-  join(name) {
+  join(name, code) {
     if (!validName(name)) {
       this.#show("ready", nameRule);
       return;
     }
     this.name = name;
     this.#retryIndex = 0;
-    return this.checkAccess();
+    return this.checkAccess(code);
   }
 
   async leave() {

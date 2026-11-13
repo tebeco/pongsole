@@ -8,6 +8,7 @@
     <Project Path="src/Pongsole.Tunnel/Pongsole.Tunnel.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Pongsole.AppHost.Tests/Pongsole.AppHost.Tests.csproj" />
     <Project Path="tests/Pongsole.Client.Tests/Pongsole.Client.Tests.csproj" />
     <Project Path="tests/Pongsole.Core.Tests/Pongsole.Core.Tests.csproj" />
     <Project Path="tests/Pongsole.Server.Tests/Pongsole.Server.Tests.csproj" />
