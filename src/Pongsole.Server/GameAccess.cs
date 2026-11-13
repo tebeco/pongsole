@@ -57,7 +57,7 @@ internal sealed class GameAccess
                 return;
             }
 
-            var status = RejectionStatus(context);
+            var status = await RejectionStatusAsync(context);
             if (status is int rejection)
                 context.Response.StatusCode = rejection;
             else
@@ -65,24 +65,52 @@ internal sealed class GameAccess
         });
     }
 
-    private int? RejectionStatus(HttpContext context)
+    internal bool IsLoopback => codeHash is null;
+
+    private async Task<int?> RejectionStatusAsync(HttpContext context)
     {
-        if (codeHash is null)
+        var request = context.Request;
+        var hasOrigin = request.Headers.ContainsKey("Origin");
+        if (hasOrigin && !BrowserAccess.HasSameOrigin(request))
+            return StatusCodes.Status403Forbidden;
+
+        if (IsLoopback)
         {
-            var peer = context.Connection.RemoteIpAddress;
-            if (peer?.IsIPv4MappedToIPv6 == true)
-                peer = peer.MapToIPv4();
-            return peer is not null && IPAddress.IsLoopback(peer) ? null : StatusCodes.Status403Forbidden;
+            var local = hasOrigin ? IsLocalBrowser(context) : IsLocalPeer(context);
+            return local ? null : StatusCodes.Status403Forbidden;
         }
 
-        if (!context.Request.IsHttps)
+        if (!request.IsHttps || request.Headers.ContainsKey("X-Pong-Code"))
+            return CodeRejection(request);
+
+        return hasOrigin && await BrowserAccess.HasTicketAsync(context)
+            ? null
+            : StatusCodes.Status401Unauthorized;
+    }
+
+    internal int? CodeRejection(HttpRequest request)
+    {
+        if (!request.IsHttps)
             return StatusCodes.Status403Forbidden;
-        if (!context.Request.Headers.TryGetValue("X-Pong-Code", out var supplied))
+        if (!request.Headers.TryGetValue("X-Pong-Code", out var supplied))
             return StatusCodes.Status401Unauthorized;
-        if (supplied.Count != 1 || !CryptographicOperations.FixedTimeEquals(codeHash, HashCode(supplied.ToString())))
+        if (supplied.Count != 1 || !CryptographicOperations.FixedTimeEquals(codeHash!, HashCode(supplied.ToString())))
             return StatusCodes.Status403Forbidden;
         return null;
     }
+
+    internal static bool IsLocalBrowser(HttpContext context)
+    {
+        var host = context.Request.Host.Host;
+        return IsLocalPeer(context) && (host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+            IPAddress.TryParse(host.Trim('[', ']'), out var address) && IsLoopbackAddress(address));
+    }
+
+    private static bool IsLocalPeer(HttpContext context) =>
+        context.Connection.RemoteIpAddress is { } peer && IsLoopbackAddress(peer);
+
+    private static bool IsLoopbackAddress(IPAddress address) =>
+        IPAddress.IsLoopback(address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address);
 
     private static byte[] HashCode(string code) => SHA256.HashData(Encoding.UTF8.GetBytes(code));
 }
