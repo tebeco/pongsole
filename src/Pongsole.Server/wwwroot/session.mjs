@@ -20,6 +20,8 @@ export class GameSession {
   name = "";
   player = null;
   lastSequence = 0;
+  choosingMode = false;
+  modeError = "";
   #attempt;
   #generation = 0;
   #retry;
@@ -46,6 +48,8 @@ export class GameSession {
   }
 
   #replaceAttempt() {
+    this.choosingMode = false;
+    this.modeError = "";
     const previous = this.#attempt;
     const next = { generation: ++this.#generation, abort: new AbortController() };
     this.#attempt = next;
@@ -120,8 +124,39 @@ export class GameSession {
     if (this.#isCurrent(next)) await this.checkAccess();
   }
 
+  get canSelectMode() {
+    return this.state === "playing" && this.player !== null &&
+      this.history.newest?.arena.mode === "awaitingSelection" &&
+      this.history.newest.modeSelectorPlayerId === this.player.playerId;
+  }
+
+  async selectMode(mode) {
+    const attempt = this.#attempt;
+    if (!this.canSelectMode || this.choosingMode) return;
+    this.choosingMode = true;
+    this.modeError = "";
+    this.changed();
+    try {
+      await attempt.connection.selectMode(mode);
+      // Keep the buttons disabled until the authoritative mode arrives.
+    } catch (error) {
+      if (!this.#isCurrent(attempt) || !this.canSelectMode) return;
+      this.choosingMode = false;
+      this.modeError = ({
+        PONGSOLE_MODE_FORBIDDEN: "Another player can choose the mode.",
+        PONGSOLE_MODE_LOCKED: "The game mode has already been chosen.",
+        PONGSOLE_INVALID_MODE: "That game mode is unavailable.",
+      })[marker(error)] ?? "Could not choose the game mode. Try again.";
+      this.changed();
+    }
+  }
+
   #accept(snapshot) {
     if (!this.history.accept(snapshot, this.time.now())) return;
+    if (!this.canSelectMode) {
+      this.choosingMode = false;
+      this.modeError = "";
+    }
     const player = snapshot.players.find(candidate => candidate.playerId === this.player?.playerId);
     if (player) this.lastSequence = Math.max(this.lastSequence, player.lastProcessedSequence);
     if (!this.canMove) this.clearMovement(this.state !== "playing");
@@ -218,6 +253,7 @@ export class GameSession {
       return;
     }
     const messages = {
+      PONGSOLE_PROTOCOL_VERSION: "The game version changed. Reload the page or ask the host to update Pongsole.",
       PONGSOLE_SESSION_ALREADY_CONNECTED: "This player session is still connected. Close the other connection before joining again.",
       PONGSOLE_ALREADY_JOINED: "The server says this connection already joined.",
       PONGSOLE_INVALID_DIRECTION: "The server rejected the movement direction.",

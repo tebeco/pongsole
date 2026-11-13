@@ -29,6 +29,14 @@
         <button id="leave" type="button" hidden>Leave game</button>
         <p id="message" role="status" aria-live="polite"></p>
       </header>
+      <div class="game-mode" id="game-mode" hidden>
+        <p id="mode-status" role="status"></p>
+        <div id="mode-choices" aria-label="Game mode" role="group" hidden>
+          <button type="button" data-mode="allTogether">All together</button>
+          <button type="button" data-mode="individualPaddles">Individual paddles</button>
+        </div>
+        <p id="mode-error" role="status" hidden></p>
+      </div>
       <div class="scoreboard" aria-label="Score">
         <div class="team left"><span>Left</span><strong id="left-score">0</strong></div>
         <div class="match"><span id="phase">Ready</span><small id="players">0 players</small></div>
@@ -40,7 +48,7 @@
           <ul id="roster-left"></ul>
         </section>
         <div class="court">
-          <canvas id="arena" role="img" aria-label="Pong court with a paddle on each side and a ball">Pong court</canvas>
+          <canvas id="arena" role="img" aria-label="Pong court with paddles and balls">Pong court</canvas>
         </div>
         <section class="roster roster-right" aria-labelledby="roster-right-label">
           <h2 id="roster-right-label">Right team</h2>
