@@ -1,5 +1,7 @@
 import { drawArena } from "./arena.mjs";
-import { GameSession } from "./session.mjs";
+import { bindControls } from "./controls.mjs";
+import { Movement } from "./movement.mjs";
+import { clock, GameSession } from "./session.mjs";
 import { browserSession, gameSocket } from "./transport.mjs";
 
 const byId = id => document.getElementById(id);
@@ -30,8 +32,20 @@ const session = new GameSession({
   },
   socket: gameSocket,
   changed: show,
-  clearMovement: () => {},
+  clearMovement: disconnected => movement.clear(disconnected),
 });
+
+const movement = new Movement({
+  time: clock,
+  enabled: () => session.canMove && !document.hidden,
+  send: direction => session.send(direction),
+  changed: () => {
+    for (const button of controls) {
+      button.dataset.held = movement.isHeld(button.dataset.direction);
+    }
+  },
+});
+bindControls(movement, controls, window, document);
 
 function show() {
   const { state, detail, history, player } = session;

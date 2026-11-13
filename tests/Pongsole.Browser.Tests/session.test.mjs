@@ -183,3 +183,40 @@ test("handles denied HTTP access and rejected shared code without exposing it", 
   assert.equal(rejected.session.state, "access");
   assert.doesNotMatch(rejected.session.detail, /secret/);
 });
+
+test("reconnect follows 0, 2, 5 and repeated 10-second delays", async () => {
+  const connected = new Socket();
+  const unavailable = Object.assign(new Socket(), { async start() { throw new Error("socket failed"); } });
+  const sockets = [connected, unavailable, unavailable, unavailable, unavailable, unavailable, new Socket()];
+  const { session, time, accessCalls } = fixture(sockets);
+  await session.join("Player");
+  connected.close();
+  for (const delay of [0, 2_000, 5_000, 10_000, 10_000, 10_000]) {
+    const before = accessCalls.length;
+    if (delay > 0) {
+      await time.advance(delay - 1);
+      assert.equal(accessCalls.length, before);
+    }
+    await time.advance(delay === 0 ? 0 : 1);
+    assert.equal(accessCalls.length, before + 1);
+  }
+  assert.equal(session.state, "playing");
+});
+
+test("Leave and a following Join wait for an old socket to stop", async () => {
+  const pendingStop = deferred();
+  const first = Object.assign(new Socket(), { stop: () => pendingStop.promise });
+  const second = new Socket();
+  const { session, time } = fixture([first, second]);
+  await session.join("First");
+  first.close();
+  const leaving = session.leave();
+  const joining = session.join("Second");
+  await flush();
+  assert.equal(second.calls.length, 0);
+  pendingStop.resolve();
+  await leaving;
+  await joining;
+  await time.advance(0);
+  assert.deepEqual(second.calls, [["Join", "Second", null]]);
+});
