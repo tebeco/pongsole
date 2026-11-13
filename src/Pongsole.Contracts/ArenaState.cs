@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace Pongsole.Contracts;
 
 public sealed record ArenaState(
@@ -8,4 +10,5 @@ public sealed record ArenaState(
     int ServeTicksRemaining,
     PaddleState LeftPaddle,
     PaddleState RightPaddle,
-    BallState Ball);
+    ImmutableArray<BallState> Balls,
+    ImmutableArray<PickupState> Pickups);

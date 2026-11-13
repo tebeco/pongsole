@@ -58,7 +58,7 @@ public sealed class TerminalPresentationTests
     public void ArenaUsesTerminalCellAspectAndFitsMinimumWindow()
     {
         var arena = new ArenaState(0, 2, 1, Phase.Serving, 60, new PaddleState(15, 0), new PaddleState(15, 0),
-            new BallState(50, 15, 0, 0));
+            [new BallState(1, 50, 15, 0, 0)], []);
 
         RosterPlayer[] players = [new("One", Team.Left), new("Two", Team.Left), new("Three", Team.Right)];
         var lines = GameRenderer.Draw(80, 24, arena, players, Team.Left, "Connected");
@@ -114,4 +114,36 @@ public sealed class TerminalPresentationTests
         Assert.DoesNotContain(lines, line => line.StartsWith("Left7 "));
         Assert.All(lines, line => Assert.True(line.Length <= 79));
     }
+    [Fact]
+    public void MultipleBallsAndOverlapFitMinimumCourt()
+    {
+        var arena = SnapshotHistoryTests.Snapshot(0, 50, []).Arena with
+        {
+            Balls = [new BallState(1, -.5, .5, 0, 0), new BallState(2, 100.5, 29.5, 0, 0),
+                new BallState(3, 50, 15, 0, 0), new BallState(4, 50, 15, 0, 0)]
+        };
+
+        var lines = GameRenderer.Draw(80, 24, arena, [], Team.Left, "Connected");
+        Assert.Equal(3, lines.Sum(line => line.Length >= 61 ? line.Substring(18, 43).Count(cell => cell == 'o') : 0));
+        Assert.All(lines, line => Assert.True(line.Length <= 79));
+    }
+
+    [Theory]
+    [InlineData(1, 3600, "60s")]
+    [InlineData(10, 3541, "60s")]
+    [InlineData(10, 3540, "59s")]
+    public void DrawsPickupAndAuthoritativeCountdownInsideMinimumCourt(int amount, int remainingTicks, string seconds)
+    {
+        var arena = SnapshotHistoryTests.Snapshot(0, 50, []).Arena with
+        {
+            Pickups = [new PickupState(1, 100, 30, amount, remainingTicks)]
+        };
+
+        var lines = GameRenderer.Draw(80, 24, arena, [], Team.Right, "Connected");
+        var markerRow = Array.FindIndex(lines, line => line.Contains($"+{amount}|"));
+        Assert.True(markerRow >= 0);
+        Assert.Contains(seconds + "|", lines[markerRow + 1]);
+        Assert.All(lines, line => Assert.True(line.Length <= 79));
+    }
+
 }
