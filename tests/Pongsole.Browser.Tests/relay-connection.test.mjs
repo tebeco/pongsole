@@ -90,7 +90,7 @@ test("joins only after control admission and a matching decoded snapshot", async
   })).buffer });
   await Promise.resolve();
   assert.equal(completed, false);
-  const fixtureData = JSON.parse(fs.readFileSync(new URL("../Fixtures/realtime-v1.json", import.meta.url)));
+  const fixtureData = JSON.parse(fs.readFileSync(new URL("../Fixtures/realtime-v2.json", import.meta.url)));
   const payload = Buffer.from(fixtureData.snapshotHex, "hex");
   const count = Math.ceil(payload.length / 972);
   for (let index = count - 1; index >= 0; index--) {
@@ -98,7 +98,7 @@ test("joins only after control admission and a matching decoded snapshot", async
     const packet = new ArrayBuffer(28 + part.length);
     const view = new DataView(packet);
     view.setUint16(0, 0x4750, true);
-    view.setUint8(2, 1);
+    view.setUint8(2, 2);
     view.setUint8(3, 1);
     view.setBigUint64(4, 7n, true);
     view.setBigUint64(12, 42n, true);

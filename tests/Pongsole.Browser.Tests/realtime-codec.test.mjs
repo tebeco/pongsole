@@ -3,7 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import { kind, readPacket, readSnapshot, SnapshotReassembly, writeEcho, writeInput } from "../../src/Pongsole.Server/wwwroot/realtime-codec.mjs";
 
-const vectors = JSON.parse(fs.readFileSync(new URL("../Fixtures/realtime-v1.json", import.meta.url)));
+const vectors = JSON.parse(fs.readFileSync(new URL("../Fixtures/realtime-v2.json", import.meta.url)));
 const bytes = hex => Uint8Array.from(Buffer.from(hex, "hex"));
 
 test("input bytes match the native golden vector and malformed packets are rejected", () => {
@@ -13,6 +13,9 @@ test("input bytes match the native golden vector and malformed packets are rejec
     chunk: Uint8Array.of(2, 0, 0, 0, 0, 0, 0, 0, 0, 0) });
   assert.equal(readPacket(Uint8Array.of(...packet, 0)), null);
   assert.equal(readPacket(packet.slice(1)), null);
+  const old = packet.slice();
+  old[2] = 1;
+  assert.equal(readPacket(old), null);
   assert.throws(() => writeInput(7, Number.MAX_SAFE_INTEGER + 1, "up"), RangeError);
   assert.equal(readPacket(writeEcho(7, 19)).id, 19);
 });
@@ -25,6 +28,18 @@ test("decodes the shared snapshot vector and rejects malformed data", () => {
   assert.equal(snapshot.arena.balls.length, 10);
   assert.equal(snapshot.arena.pickups.length, 12);
   assert.equal(snapshot.players.length, 64);
+  assert.equal(snapshot.arena.mode, "individualPaddles");
+  assert.equal(snapshot.arena.playerPaddles.length, 64);
+  assert.deepEqual(snapshot.arena.playerPaddles[0], {
+    playerId: snapshot.players[0].playerId, team: "right", y: 15, velocity: 2,
+  });
+  const trailer = payload.length - (3 + 64 * 33);
+  const badMode = payload.slice();
+  badMode[trailer] = 255;
+  assert.equal(readSnapshot(badMode), null);
+  const duplicate = payload.slice();
+  duplicate.set(payload.subarray(trailer + 3, trailer + 19), trailer + 36);
+  assert.equal(readSnapshot(duplicate), null);
   assert.equal(snapshot.players[0].playerId, "00000001-0000-0000-0000-000000000000");
   assert.equal(snapshot.players[0].displayName, "Player0001");
   assert.equal(snapshot.players[0].lastUpTick, 40);

@@ -11,5 +11,6 @@ public static class GameJson
         options.Converters.Add(new JsonStringEnumConverter<Direction>(JsonNamingPolicy.CamelCase, allowIntegerValues: false));
         options.Converters.Add(new JsonStringEnumConverter<Team>(JsonNamingPolicy.CamelCase, allowIntegerValues: false));
         options.Converters.Add(new JsonStringEnumConverter<Phase>(JsonNamingPolicy.CamelCase, allowIntegerValues: false));
+        options.Converters.Add(new JsonStringEnumConverter<GameMode>(JsonNamingPolicy.CamelCase, allowIntegerValues: false));
     }
 }

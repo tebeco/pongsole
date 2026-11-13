@@ -22,7 +22,8 @@ public sealed record RtcDescription(string Sdp)
 public sealed record ControlMessage(
     string Type, string? Name = null, string? ResumeToken = null,
     Guid? PlayerId = null, Pongsole.Contracts.Team? Team = null,
-    long? LastProcessedSequence = null, string? Code = null)
+    long? LastProcessedSequence = null, string? Code = null,
+    Pongsole.Contracts.GameMode? Mode = null)
 {
     public const int MaxMessageBytes = 4096;
     public override string ToString() => nameof(ControlMessage);

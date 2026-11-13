@@ -33,6 +33,7 @@ internal sealed class RtcConnection
     private bool offered;
     private bool joined;
     private bool joining;
+    private bool selectingMode;
     private bool closed;
     private bool sendingSnapshot;
 
@@ -171,6 +172,15 @@ internal sealed class RtcConnection
         }
         catch (JsonException)
         {
+            if (IsInvalidModeRequest(bytes))
+            {
+                lock (gate)
+                {
+                    if (!closed && !selectingMode)
+                        SendControl(new ControlMessage("modeResult", Code: GameErrors.InvalidMode().Message));
+                }
+                return;
+            }
             Close();
             return;
         }
@@ -182,6 +192,14 @@ internal sealed class RtcConnection
 
             if (message is { Type: "leave" })
                 Close();
+            else if (message is { Type: "selectMode" })
+            {
+                if (!selectingMode)
+                {
+                    selectingMode = true;
+                    _ = SelectModeAsync(message.Mode ?? GameMode.AwaitingSelection);
+                }
+            }
             else if (message is not { Type: "join" })
                 Close();
             else if (joining || joined)
@@ -191,6 +209,47 @@ internal sealed class RtcConnection
                 joining = true;
                 _ = JoinAsync(message);
             }
+        }
+    }
+
+    private static bool IsInvalidModeRequest(ReadOnlyMemory<byte> bytes)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(bytes);
+            return document.RootElement.ValueKind == JsonValueKind.Object &&
+                document.RootElement.TryGetProperty("type", out var type) &&
+                type.ValueKind == JsonValueKind.String && type.GetString() == "selectMode";
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private async Task SelectModeAsync(GameMode requestedMode)
+    {
+        ControlMessage response;
+        try
+        {
+            var selected = await coordinator.SelectModeAsync(lease, requestedMode);
+            response = new ControlMessage("modeResult", Mode: selected);
+        }
+        catch (HubException error)
+        {
+            response = new ControlMessage("modeResult", Code: error.Message);
+        }
+        catch (Exception)
+        {
+            Close();
+            return;
+        }
+
+        lock (gate)
+        {
+            selectingMode = false;
+            if (!closed)
+                SendControl(response);
         }
     }
 

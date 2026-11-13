@@ -13,12 +13,107 @@ public sealed class GameCoordinatorTests
     private GameCoordinator NewCoordinator() => new(engine, time, new Random(2));
 
     [Fact]
+    public async Task ModeChoiceRequiresCurrentOldestPlayerAndFirstValidRequestLocksMode()
+    {
+        using var coordinator = NewCoordinator();
+        var first = coordinator.Admit("first", 1);
+        var second = coordinator.Admit("second", 2);
+        var firstJoin = await Complete(coordinator, coordinator.JoinAsync(first, "First", null));
+        var secondJoin = await Complete(coordinator, coordinator.JoinAsync(second, "Second", null));
+        Assert.Equal(GameMode.AwaitingSelection, secondJoin.Snapshot.Arena.Mode);
+        Assert.Equal(firstJoin.PlayerId, secondJoin.Snapshot.ModeSelectorPlayerId);
+        coordinator.ReceiveInput(first, 1, 1, new InputState(Direction.Down, true, 1));
+        var waiting = await ReadSnapshot(coordinator, "first");
+        Assert.Equal(Phase.Waiting, waiting.Arena.Phase);
+        Assert.All(waiting.Players, player => Assert.Equal(0, player.RecentPushCount));
+        await Error("MODE_FORBIDDEN", () => Complete(coordinator,
+            coordinator.SelectModeAsync(second, GameMode.IndividualPaddles)));
+        await Error("INVALID_MODE", () => Complete(coordinator,
+            coordinator.SelectModeAsync(first, GameMode.AwaitingSelection)));
+
+        var selection = coordinator.SelectModeAsync(first, GameMode.IndividualPaddles);
+        var race = coordinator.SelectModeAsync(first, GameMode.AllTogether);
+        coordinator.Tick();
+        Assert.Equal(GameMode.IndividualPaddles, await selection);
+        await Error("MODE_LOCKED", () => race);
+        var selected = await ReadSnapshot(coordinator, "first");
+        Assert.Null(selected.ModeSelectorPlayerId);
+        Assert.Equal(GameMode.IndividualPaddles, selected.Arena.Mode);
+        Assert.Equal(2, selected.Arena.PlayerPaddles.Length);
+        Assert.All(selected.Arena.PlayerPaddles, paddle => Assert.Equal(15, paddle.Y));
+    }
+
+    [Fact]
+    public async Task SelectorTransfersAndSelectedModeSurvivesResumeUntilLastSessionExpires()
+    {
+        using var coordinator = NewCoordinator();
+        var first = coordinator.Admit("first", 1);
+        var second = coordinator.Admit("second", 2);
+        await Complete(coordinator, coordinator.JoinAsync(first, "First", null));
+        var secondJoin = await Complete(coordinator, coordinator.JoinAsync(second, "Second", null));
+        var disconnect = coordinator.DisconnectAsync(first);
+        var staleSelection = coordinator.SelectModeAsync(first, GameMode.AllTogether);
+        coordinator.Tick();
+        await disconnect;
+        await Error("MODE_FORBIDDEN", () => staleSelection);
+        Assert.Equal(secondJoin.PlayerId, (await ReadSnapshot(coordinator, "second")).ModeSelectorPlayerId);
+        await Complete(coordinator, coordinator.SelectModeAsync(second, GameMode.IndividualPaddles));
+        await Complete(coordinator, coordinator.DisconnectAsync(second));
+
+        time.Advance(TimeSpan.FromSeconds(59));
+        var returning = coordinator.Admit("returning", 3);
+        var resumed = await Complete(coordinator, coordinator.JoinAsync(returning, "", secondJoin.ResumeToken));
+        Assert.Equal(secondJoin.PlayerId, resumed.PlayerId);
+        Assert.Equal(GameMode.IndividualPaddles, resumed.Snapshot.Arena.Mode);
+        Assert.Equal(15, Assert.Single(resumed.Snapshot.Arena.PlayerPaddles).Y);
+        await Complete(coordinator, coordinator.DisconnectAsync(returning));
+
+        time.Advance(TimeSpan.FromSeconds(60));
+        var next = coordinator.Admit("next", 4);
+        var nextJoin = await Complete(coordinator, coordinator.JoinAsync(next, "Next", null));
+        Assert.Equal(GameMode.AwaitingSelection, nextJoin.Snapshot.Arena.Mode);
+        Assert.Equal(nextJoin.PlayerId, nextJoin.Snapshot.ModeSelectorPlayerId);
+    }
+
+    [Fact]
+    public async Task PersonalMovementStaysWithItsPlayerAndResumedPaddleStartsCentered()
+    {
+        using var coordinator = NewCoordinator();
+        var first = coordinator.Admit("first", 1);
+        var second = coordinator.Admit("second", 2);
+        var third = coordinator.Admit("third", 3);
+        var firstJoin = await Complete(coordinator, coordinator.JoinAsync(first, "First", null));
+        var secondJoin = await Complete(coordinator, coordinator.JoinAsync(second, "Second", null));
+        var thirdJoin = await Complete(coordinator, coordinator.JoinAsync(third, "Third", null));
+        await Complete(coordinator, coordinator.SelectModeAsync(first, GameMode.IndividualPaddles));
+
+        coordinator.ReceiveInput(first, 1, 1, new InputState(Direction.Up, true, 1));
+        var moved = await ReadSnapshot(coordinator, "first");
+        Assert.True(moved.Arena.PlayerPaddles.Single(paddle => paddle.PlayerId == firstJoin.PlayerId).Y < 15);
+        Assert.All(moved.Arena.PlayerPaddles.Where(paddle => paddle.PlayerId != firstJoin.PlayerId),
+            paddle => Assert.Equal(15, paddle.Y));
+
+        var teammate = thirdJoin.Team == firstJoin.Team ? thirdJoin : secondJoin;
+        await Complete(coordinator, coordinator.DisconnectAsync(first));
+        Assert.DoesNotContain(engine.State.PlayerPaddles, paddle => paddle.PlayerId == firstJoin.PlayerId);
+        Assert.Contains(engine.State.PlayerPaddles, paddle => paddle.PlayerId == teammate.PlayerId);
+        var replacement = coordinator.Admit("replacement", 4);
+        var resumed = await Complete(coordinator, coordinator.JoinAsync(replacement, "", firstJoin.ResumeToken));
+        Assert.Equal(15, resumed.Snapshot.Arena.PlayerPaddles.Single(paddle => paddle.PlayerId == firstJoin.PlayerId).Y);
+        coordinator.ReceiveInput(first, 1, 3, new InputState(Direction.Up, true, 2));
+        coordinator.ReceiveInput(replacement, 1, 3, new InputState(Direction.Up, true, 2));
+        var next = await ReadSnapshot(coordinator, "replacement");
+        Assert.Equal(15, next.Arena.PlayerPaddles.Single(paddle => paddle.PlayerId == firstJoin.PlayerId).Y);
+    }
+
+    [Fact]
     public async Task RealtimeNeutralOverwritesPendingInputAndOldPacketsCannotRestoreIt()
     {
         using var coordinator = NewCoordinator();
         var lease = coordinator.Admit("player", 10);
         coordinator.Admit("opponent");
         var join = await Complete(coordinator, coordinator.JoinAsync(lease, "Player", null));
+        await Complete(coordinator, coordinator.SelectModeAsync(lease, GameMode.AllTogether));
         await Complete(coordinator, coordinator.JoinAsync("opponent", "Opponent", null));
 
         coordinator.ReceiveInput(lease, 10, 2, new InputState(Direction.Up, false, 0));
@@ -40,6 +135,7 @@ public sealed class GameCoordinatorTests
         var lease = coordinator.Admit("player", 10);
         coordinator.Admit("opponent");
         var join = await Complete(coordinator, coordinator.JoinAsync(lease, "Player", null));
+        await Complete(coordinator, coordinator.SelectModeAsync(lease, GameMode.AllTogether));
         await Complete(coordinator, coordinator.JoinAsync("opponent", "Opponent", null));
         PlayerState Player(GameSnapshot state) => state.Players.Single(player => player.PlayerId == join.PlayerId);
 
@@ -67,6 +163,7 @@ public sealed class GameCoordinatorTests
         var lease = coordinator.Admit("player", 10);
         coordinator.Admit("opponent");
         var join = await Complete(coordinator, coordinator.JoinAsync(lease, "Player", null));
+        await Complete(coordinator, coordinator.SelectModeAsync(lease, GameMode.AllTogether));
         await Complete(coordinator, coordinator.JoinAsync("opponent", "Opponent", null));
 
         for (var sequence = 1; sequence <= 60; sequence++)
@@ -90,6 +187,7 @@ public sealed class GameCoordinatorTests
         var old = coordinator.Admit("old", 10);
         coordinator.Admit("opponent");
         var join = await Complete(coordinator, coordinator.JoinAsync(old, "Player", null));
+        await Complete(coordinator, coordinator.SelectModeAsync(old, GameMode.AllTogether));
         await Complete(coordinator, coordinator.JoinAsync("opponent", "Opponent", null));
         coordinator.ReceiveInput(old, 10, 4, new InputState(Direction.Up, false, 0));
         await Complete(coordinator, coordinator.DisconnectAsync(old));
@@ -117,6 +215,7 @@ public sealed class GameCoordinatorTests
         var second = coordinator.Admit("second");
         var third = coordinator.Admit("third");
         var one = await Complete(coordinator, coordinator.JoinAsync(first, "First", null));
+        await Complete(coordinator, coordinator.SelectModeAsync(first, GameMode.AllTogether));
         await Complete(coordinator, coordinator.JoinAsync(second, "Second", null));
         var three = await Complete(coordinator, coordinator.JoinAsync(third, "Third", null));
         var teammate = one.Team == three.Team ? first : second;
@@ -153,6 +252,7 @@ public sealed class GameCoordinatorTests
         var lease = coordinator.Admit("player");
         coordinator.Admit("opponent");
         var join = await Complete(coordinator, coordinator.JoinAsync(lease, "Player", null));
+        await Complete(coordinator, coordinator.SelectModeAsync(lease, GameMode.AllTogether));
         await Complete(coordinator, coordinator.JoinAsync("opponent", "Opponent", null));
 
         await coordinator.SetHeldAsync(lease, Direction.Up, 1);
@@ -180,6 +280,7 @@ public sealed class GameCoordinatorTests
         var lease = coordinator.Admit("player");
         coordinator.Admit("opponent");
         var join = await Complete(coordinator, coordinator.JoinAsync(lease, "Player", null));
+        await Complete(coordinator, coordinator.SelectModeAsync(lease, GameMode.AllTogether));
         await Complete(coordinator, coordinator.JoinAsync("opponent", "Opponent", null));
 
         for (var sequence = 1; sequence <= 40; sequence++)
@@ -286,9 +387,10 @@ public sealed class GameCoordinatorTests
     public async Task RateHistorySurvivesResumeAndAgesAtOneSecond()
     {
         using var coordinator = NewCoordinator();
-        coordinator.Admit("player");
+        var lease = coordinator.Admit("player");
         coordinator.Admit("opponent");
-        var joined = await Complete(coordinator, coordinator.JoinAsync("player", "Player", null));
+        var joined = await Complete(coordinator, coordinator.JoinAsync(lease, "Player", null));
+        await Complete(coordinator, coordinator.SelectModeAsync(lease, GameMode.AllTogether));
         await Complete(coordinator, coordinator.JoinAsync("opponent", "Opponent", null));
         var accepted = Enumerable.Range(1, 10)
             .Select(sequence => coordinator.PushAsync("player", Direction.Up, sequence)).ToArray();
@@ -431,8 +533,10 @@ public sealed class GameCoordinatorTests
         foreach (var name in new[] { "z", "RightA", "A", "RightB", "a", "RightC", "A" })
         {
             var connection = joins.Count.ToString();
-            coordinator.Admit(connection);
-            joins.Add(await Complete(coordinator, coordinator.JoinAsync(connection, name, null)));
+            var lease = coordinator.Admit(connection);
+            joins.Add(await Complete(coordinator, coordinator.JoinAsync(lease, name, null)));
+            if (joins.Count == 1)
+                await Complete(coordinator, coordinator.SelectModeAsync(lease, GameMode.AllTogether));
         }
 
         var initial = await ReadSnapshot(coordinator, "0");

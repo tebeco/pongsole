@@ -9,6 +9,7 @@ public sealed class GameEngine
     private const double ArenaWidth = 100;
     private const double ArenaHeight = 30;
     private const double PaddleHalfHeight = 3;
+    private const double IndividualPaddleHalfHeight = 1.5;
     private const double BallRadius = 0.5;
     private const double PaddleHalfWidth = 0.5;
     private const double LeftPaddleFace = 2 + PaddleHalfWidth + BallRadius;
@@ -34,6 +35,7 @@ public sealed class GameEngine
     private long _nextBallId;
     private long _nextPickupId;
     private int _pickupSpawnTicks;
+    private ImmutableArray<PaddleParticipant> _participants = [];
 
     public GameEngine(int randomSeed)
         : this(randomSeed, new ArenaState(
@@ -61,27 +63,68 @@ public sealed class GameEngine
 
     public ArenaState State { get; private set; }
 
-    public ArenaState Advance(int leftPushes, int rightPushes, bool leftPresent, bool rightPresent)
+    public void SynchronizeParticipants(GameMode mode, ImmutableArray<PaddleParticipant> participants)
+    {
+        _participants = participants;
+        var modeChanged = State.Mode != mode;
+        var bothTeamsPresent = HasBothTeams();
+        if (modeChanged || (!bothTeamsPresent && State.Phase != Phase.Waiting))
+            State = EnterWaiting(State);
+
+        var previousPaddles = modeChanged ? [] : State.PlayerPaddles;
+        State = State with
+        {
+            Mode = mode,
+            PlayerPaddles = mode == GameMode.IndividualPaddles
+                ? [.. participants.OrderBy(participant => participant.PlayerId)
+                    .Select(participant => previousPaddles.FirstOrDefault(paddle => paddle.PlayerId == participant.PlayerId &&
+                        paddle.Team == participant.Team) ?? new PlayerPaddleState(participant.PlayerId, participant.Team,
+                        CenteredPaddle.Y, 0))]
+                : [],
+        };
+    }
+
+    public ArenaState Advance(ImmutableArray<PlayerPaddleInput> inputs)
+    {
+        var pushes = new Dictionary<Guid, int>();
+        foreach (var input in inputs)
+            pushes[input.PlayerId] = pushes.GetValueOrDefault(input.PlayerId) + input.Pushes;
+
+        var leftPushes = 0;
+        var rightPushes = 0;
+        if (State.Mode == GameMode.AllTogether)
+        {
+            foreach (var participant in _participants)
+            {
+                if (participant.Team == Team.Left)
+                    leftPushes += pushes.GetValueOrDefault(participant.PlayerId);
+                else
+                    rightPushes += pushes.GetValueOrDefault(participant.PlayerId);
+            }
+        }
+
+        var bothTeamsPresent = HasBothTeams();
+        return Advance(leftPushes, rightPushes, bothTeamsPresent, bothTeamsPresent, pushes);
+    }
+
+    public ArenaState Advance(int leftPushes, int rightPushes, bool leftPresent, bool rightPresent) =>
+        Advance(leftPushes, rightPushes, leftPresent, rightPresent, null);
+
+    private bool HasBothTeams() => _participants.Any(participant => participant.Team == Team.Left) &&
+        _participants.Any(participant => participant.Team == Team.Right);
+
+    private ArenaState Advance(int leftPushes, int rightPushes, bool leftPresent, bool rightPresent,
+        IReadOnlyDictionary<Guid, int>? individualPushes)
     {
         var next = State with { Tick = State.Tick + 1 };
-        if (!leftPresent || !rightPresent)
+        if (next.Mode == GameMode.AwaitingSelection || !leftPresent || !rightPresent)
         {
             if (next.Phase == Phase.Waiting)
             {
                 return State = next;
             }
 
-            _serveDirection = RandomServeDirection();
-            _pickupSpawnTicks = 0;
-            return State = next with
-            {
-                Phase = Phase.Waiting,
-                ServeTicksRemaining = 0,
-                LeftPaddle = CenteredPaddle,
-                RightPaddle = CenteredPaddle,
-                Balls = [CenteredBall(_nextBallId++)],
-                Pickups = [],
-            };
+            return State = EnterWaiting(next);
         }
 
         if (next.Phase == Phase.Waiting)
@@ -93,11 +136,17 @@ public sealed class GameEngine
             };
         }
 
-        next = next with
-        {
-            LeftPaddle = AdvancePaddle(next.LeftPaddle, leftPushes),
-            RightPaddle = AdvancePaddle(next.RightPaddle, rightPushes),
-        };
+        next = next.Mode == GameMode.IndividualPaddles
+            ? next with
+            {
+                PlayerPaddles = [.. next.PlayerPaddles.Select(paddle => AdvanceIndividualPaddle(
+                    paddle, individualPushes?.GetValueOrDefault(paddle.PlayerId) ?? 0))],
+            }
+            : next with
+            {
+                LeftPaddle = AdvancePaddle(next.LeftPaddle, leftPushes, PaddleHalfHeight),
+                RightPaddle = AdvancePaddle(next.RightPaddle, rightPushes, PaddleHalfHeight),
+            };
 
         if (next.Phase == Phase.Playing)
         {
@@ -117,6 +166,22 @@ public sealed class GameEngine
         }
 
         return State = next;
+    }
+
+    private ArenaState EnterWaiting(ArenaState arena)
+    {
+        _serveDirection = RandomServeDirection();
+        _pickupSpawnTicks = 0;
+        return arena with
+        {
+            Phase = Phase.Waiting,
+            ServeTicksRemaining = 0,
+            LeftPaddle = CenteredPaddle,
+            RightPaddle = CenteredPaddle,
+            PlayerPaddles = [.. arena.PlayerPaddles.Select(paddle => paddle with { Y = CenteredPaddle.Y, Velocity = 0 })],
+            Balls = [CenteredBall(_nextBallId++)],
+            Pickups = [],
+        };
     }
 
     private ArenaState AdvanceRally(ArenaState arena)
@@ -202,18 +267,18 @@ public sealed class GameEngine
 
             var movingLeft = velocityX < 0;
             var paddleX = movingLeft ? LeftPaddleFace : RightPaddleFace;
-            var paddleY = movingLeft ? arena.LeftPaddle.Y : arena.RightPaddle.Y;
             var paddleTime = TimeToPlane(x, velocityX, paddleX);
             var impactY = paddleTime <= remaining ? y + velocityY * paddleTime : y;
+            var halfHeight = arena.Mode == GameMode.IndividualPaddles ? IndividualPaddleHalfHeight : PaddleHalfHeight;
             if (paddleTime <= remaining &&
                 paddleTime <= wallTime + CoincidentContactTolerance &&
-                Math.Abs(impactY - paddleY) <= PaddleHalfHeight + BallRadius)
+                FindPaddleCenter(arena, movingLeft ? Team.Left : Team.Right, impactY, halfHeight) is { } paddleY)
             {
                 RecordPickupContacts(pickups, contacts, id, x, y, velocityX, velocityY, remaining, paddleTime);
                 var wallContact = Math.Abs(paddleTime - wallTime) <= CoincidentContactTolerance;
                 x = paddleX;
                 y = wallContact ? wallY : impactY;
-                var offset = Math.Clamp((y - paddleY) / PaddleHalfHeight, -1, 1);
+                var offset = Math.Clamp((y - paddleY) / halfHeight, -1, 1);
                 var angle = offset * MaxReboundAngle;
                 var speed = Math.Min(double.Hypot(velocityX, velocityY) * 1.05, MaxBallSpeed);
                 velocityX = (movingLeft ? 1 : -1) * speed * Math.Cos(angle);
@@ -254,6 +319,34 @@ public sealed class GameEngine
         }
 
         return new BallState(id, x, y, velocityX, velocityY);
+    }
+
+    private static double? FindPaddleCenter(ArenaState arena, Team side, double impactY, double halfHeight)
+    {
+        var maximumDistance = halfHeight + BallRadius;
+        if (arena.Mode != GameMode.IndividualPaddles)
+        {
+            var center = (side == Team.Left ? arena.LeftPaddle : arena.RightPaddle).Y;
+            return Math.Abs(impactY - center) <= maximumDistance ? center : null;
+        }
+
+        PlayerPaddleState? closest = null;
+        var closestDistance = maximumDistance;
+        foreach (var paddle in arena.PlayerPaddles)
+        {
+            if (paddle.Team != side)
+                continue;
+
+            var distance = Math.Abs(impactY - paddle.Y);
+            if (distance < closestDistance || distance == closestDistance &&
+                (closest is null || paddle.PlayerId.CompareTo(closest.PlayerId) < 0))
+            {
+                closest = paddle;
+                closestDistance = distance;
+            }
+        }
+
+        return closest?.Y;
     }
 
     private static void RecordPickupContacts(ImmutableArray<PickupState> pickups, List<PickupContact> contacts,
@@ -303,10 +396,16 @@ public sealed class GameEngine
 
     private readonly record struct PickupContact(double Time, PickupState Pickup, long BallId, int Direction);
 
-    private static PaddleState AdvancePaddle(PaddleState paddle, int pushes)
+    private static PlayerPaddleState AdvanceIndividualPaddle(PlayerPaddleState paddle, int pushes)
     {
-        const double minY = PaddleHalfHeight;
-        const double maxY = ArenaHeight - PaddleHalfHeight;
+        var next = AdvancePaddle(new PaddleState(paddle.Y, paddle.Velocity), pushes, IndividualPaddleHalfHeight);
+        return paddle with { Y = next.Y, Velocity = next.Velocity };
+    }
+
+    private static PaddleState AdvancePaddle(PaddleState paddle, int pushes, double halfHeight)
+    {
+        var minY = halfHeight;
+        var maxY = ArenaHeight - halfHeight;
         var velocity = Math.Clamp(paddle.Velocity + PaddleImpulse * pushes, -MaxPaddleSpeed, MaxPaddleSpeed);
         var y = Math.Clamp(paddle.Y + velocity * TickDuration, minY, maxY);
         if ((y == minY && velocity < 0) || (y == maxY && velocity > 0))

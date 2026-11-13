@@ -8,7 +8,7 @@ public sealed class RealtimeCodecTests
 {
     private static string Vector(string name)
     {
-        using var fixture = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "realtime-v1.json")));
+        using var fixture = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "realtime-v2.json")));
         return fixture.RootElement.GetProperty(name).GetString()!;
     }
 
@@ -26,6 +26,8 @@ public sealed class RealtimeCodecTests
         Assert.True(InputState.TryRead(packet[RealtimePacket.HeaderSize..size], out var state));
         Assert.Equal(Direction.Down, state.Direction);
         Assert.False(RealtimePacket.TryRead(packet[..(size + 1)], out _));
+        packet[2] = 1;
+        Assert.False(RealtimePacket.TryRead(packet[..size], out _));
     }
 
     [Fact]
@@ -34,7 +36,10 @@ public sealed class RealtimeCodecTests
         var snapshot = new GameSnapshot(new ArenaState(42, 7, 9, Phase.Playing, 0,
             new PaddleState(10, -1), new PaddleState(15, 2),
             [.. Enumerable.Range(1, 10).Select(id => new BallState(id, 40, 10, -12, 24))],
-            [.. Enumerable.Range(1, 12).Select(id => new PickupState(id, 20, 25, 10, 3600))]),
+            [.. Enumerable.Range(1, 12).Select(id => new PickupState(id, 20, 25, 10, 3600))],
+            GameMode.IndividualPaddles,
+            [.. Enumerable.Range(1, 64).Select(id => new PlayerPaddleState(new Guid(id, 0, 0, new byte[8]),
+                Team.Right, 15, 2))]),
             [.. Enumerable.Range(1, 64).Select(id => new PlayerState(new Guid(id, 0, 0, new byte[8]),
                 $"Player{id:0000}", Team.Right, id, 100, 40, null, 2000))]);
 
@@ -44,6 +49,17 @@ public sealed class RealtimeCodecTests
         Assert.True(SnapshotCodec.TryRead(payload, out var decoded));
         Assert.NotNull(decoded);
         Assert.Equal(payload, SnapshotCodec.Write(decoded));
+        Assert.Equal(64, decoded.Arena.PlayerPaddles.Length);
+        var trailer = payload.Length - (3 + 64 * 33);
+        var badSelector = (byte[])payload.Clone();
+        badSelector[trailer + 1] = 2;
+        Assert.False(SnapshotCodec.TryRead(badSelector, out _));
+        var wrongTeam = (byte[])payload.Clone();
+        wrongTeam[trailer + 3 + 16] = (byte)Team.Left;
+        Assert.False(SnapshotCodec.TryRead(wrongTeam, out _));
+        var duplicate = (byte[])payload.Clone();
+        payload.AsSpan(trailer + 3, 16).CopyTo(duplicate.AsSpan(trailer + 3 + 33));
+        Assert.False(SnapshotCodec.TryRead(duplicate, out _));
         Assert.False(SnapshotCodec.TryRead([.. payload, 0], out _));
         Assert.False(SnapshotCodec.TryRead(payload.AsSpan(0, payload.Length - 1), out _));
         payload[24] = 99;

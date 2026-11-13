@@ -31,6 +31,14 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
     private int leftCount;
     private int rightCount;
     private bool stopping;
+    private GameMode mode = GameMode.AwaitingSelection;
+    private long nextJoinOrdinal;
+
+    internal Task<GameMode> SelectModeAsync(ConnectionLease lease, GameMode requestedMode)
+    {
+        var completion = NewCompletion<GameMode>();
+        return EnqueueLifecycleAsync(new SelectModeCommand(lease, requestedMode, completion), completion.Task);
+    }
 
     internal ConnectionLease Admit(string connectionId, long epoch = 0)
     {
@@ -290,16 +298,14 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
             for (var count = 0; count < LifecycleCapacity && lifecycle.Reader.TryRead(out var command); count++)
                 command.Apply(this, now);
 
-            var leftPushes = 0;
-            var rightPushes = 0;
-            var canMove = engine.State.Phase != Phase.Waiting && leftCount > 0 && rightCount > 0;
+            var pushes = new Dictionary<Guid, int>();
+            var canMove = mode != GameMode.AwaitingSelection && engine.State.Phase != Phase.Waiting &&
+                leftCount > 0 && rightCount > 0;
             for (var count = 0; count < InputCapacity && input.Reader.TryRead(out var push); count++)
             {
                 var impulse = ProcessPush(push, canMove, now);
-                if (push.Session.Team == Team.Left)
-                    leftPushes += impulse;
-                else
-                    rightPushes += impulse;
+                if (impulse != 0)
+                    pushes[push.Session.PlayerId] = pushes.GetValueOrDefault(push.Session.PlayerId) + impulse;
                 push.Completion.TrySetResult(true);
             }
 
@@ -311,13 +317,11 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
                 var impulse = lease.Epoch == 0
                     ? ProcessHeld(lease.Held, session, canMove, now)
                     : ProcessRealtime(lease.Realtime, session, canMove, now);
-                if (session.Team == Team.Left)
-                    leftPushes += impulse;
-                else
-                    rightPushes += impulse;
+                if (impulse != 0)
+                    pushes[session.PlayerId] = pushes.GetValueOrDefault(session.PlayerId) + impulse;
             }
 
-            var arena = engine.Advance(leftPushes, rightPushes, leftCount > 0, rightCount > 0);
+            var arena = engine.Advance([.. pushes.Select(push => new PlayerPaddleInput(push.Key, push.Value))]);
             if (arena.Tick % 3 != 0)
                 return;
 
@@ -328,6 +332,30 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
                     lease.Snapshots.Writer.TryWrite(snapshot);
             }
         }
+    }
+
+    private Session? ModeSelector() => mode == GameMode.AwaitingSelection
+        ? connections.Values.Select(lease => lease.Session).OfType<Session>().MinBy(session => session.JoinOrdinal)
+        : null;
+
+    private void SynchronizeParticipants() => engine.SynchronizeParticipants(mode,
+        [.. connections.Values.Select(lease => lease.Session).OfType<Session>()
+            .Select(session => new PaddleParticipant(session.PlayerId, session.Team))]);
+
+    private GameMode SelectMode(ConnectionLease lease, GameMode requestedMode)
+    {
+        if (requestedMode is not (GameMode.AllTogether or GameMode.IndividualPaddles))
+            throw GameErrors.InvalidMode();
+        if (!IsCurrent(lease) || lease.Session is null)
+            throw GameErrors.ModeForbidden();
+        if (mode != GameMode.AwaitingSelection)
+            throw GameErrors.ModeLocked();
+        if (ModeSelector() != lease.Session)
+            throw GameErrors.ModeForbidden();
+
+        mode = requestedMode;
+        SynchronizeParticipants();
+        return mode;
     }
 
     private int ProcessRealtime(RealtimeInput realtime, Session session, bool canMove, long now)
@@ -437,7 +465,8 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
             var team = leftCount == rightCount
                 ? (Team)teamRandom.Next(2)
                 : leftCount < rightCount ? Team.Left : Team.Right;
-            session = new Session(Guid.NewGuid(), displayName, team, Convert.ToHexString(RandomNumberGenerator.GetBytes(32)));
+            session = new Session(Guid.NewGuid(), displayName, team,
+                Convert.ToHexString(RandomNumberGenerator.GetBytes(32)), ++nextJoinOrdinal);
             sessions.Add(session.Token, session);
         }
 
@@ -447,6 +476,7 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
             leftCount++;
         else
             rightCount++;
+        SynchronizeParticipants();
         return new JoinResult(session.PlayerId, session.Team, session.Token, session.LastProcessedSequence, Snapshot(now));
     }
 
@@ -471,6 +501,15 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
             leftCount--;
         else
             rightCount--;
+        if (leftCount == 0 || rightCount == 0)
+        {
+            foreach (var connection in connections.Values)
+            {
+                connection.Held.Clear();
+                connection.Realtime.Clear();
+            }
+        }
+        SynchronizeParticipants();
 
         if (time.GetElapsedTime(requestedAt, now) >= ResumeWindow)
         {
@@ -511,6 +550,11 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
     private void Forget(Session session)
     {
         sessions.Remove(session.Token);
+        if (sessions.Count == 0)
+        {
+            mode = GameMode.AwaitingSelection;
+            SynchronizeParticipants();
+        }
         tombstones.Add(session.Token);
         tombstoneOrder.Enqueue(session.Token);
         if (tombstoneOrder.Count > RetainedLimit)
@@ -524,7 +568,7 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
         .ThenByDescending(player => player.RecentPushCount)
         .ThenBy(player => player.DisplayName, StringComparer.Ordinal)
         .ThenBy(player => player.PlayerId)
-        .ToImmutableArray());
+        .ToImmutableArray(), ModeSelector()?.PlayerId);
 
     private PlayerState PlayerSnapshot(ConnectionLease lease, long now)
     {
@@ -615,12 +659,13 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
         }
     }
 
-    internal sealed class Session(Guid playerId, string displayName, Team team, string token)
+    internal sealed class Session(Guid playerId, string displayName, Team team, string token, long joinOrdinal)
     {
         internal Guid PlayerId { get; } = playerId;
         internal string DisplayName { get; } = displayName;
         internal Team Team { get; } = team;
         internal string Token { get; } = token;
+        internal long JoinOrdinal { get; } = joinOrdinal;
         internal ConnectionLease? Lease { get; set; }
         internal long LastProcessedSequence { get; set; }
         internal long DisconnectedAt { get; set; }
@@ -661,6 +706,24 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
         {
             owner.Disconnect(Lease, Session, RequestedAt, now);
             Completion.TrySetResult(true);
+        }
+
+        internal override void Stop() => Completion.TrySetException(GameErrors.ServerStopping());
+    }
+
+    private sealed record SelectModeCommand(ConnectionLease Lease, GameMode Mode,
+        TaskCompletionSource<GameMode> Completion) : LifecycleCommand
+    {
+        internal override void Apply(GameCoordinator owner, long now)
+        {
+            try
+            {
+                Completion.TrySetResult(owner.SelectMode(Lease, Mode));
+            }
+            catch (Microsoft.AspNetCore.SignalR.HubException exception)
+            {
+                Completion.TrySetException(exception);
+            }
         }
 
         internal override void Stop() => Completion.TrySetException(GameErrors.ServerStopping());

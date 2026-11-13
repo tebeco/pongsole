@@ -16,7 +16,7 @@ public readonly record struct RealtimeHeader(
 public static class RealtimePacket
 {
     private const ushort Magic = 0x4750;
-    private const byte Version = 1;
+    private const byte Version = 2;
     public const long MaxSafeInteger = 9_007_199_254_740_991;
     public const int HeaderSize = 28;
     public const int MaxPacketSize = 1000;
