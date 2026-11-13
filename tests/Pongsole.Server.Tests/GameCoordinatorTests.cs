@@ -12,6 +12,34 @@ public sealed class GameCoordinatorTests
     private GameCoordinator NewCoordinator() => new(engine, time, new Random(2));
 
     [Fact]
+    public async Task LatencyExpiresAndNeverSurvivesAConnectionLease()
+    {
+        using var coordinator = NewCoordinator();
+        var original = coordinator.Admit("player");
+        var join = await Complete(coordinator, coordinator.JoinAsync(original, "Player", null));
+        Assert.Null(Assert.Single(join.Snapshot.Players).LatencyMilliseconds);
+
+        coordinator.UpdateLatency(original, 24, time.GetTimestamp());
+        var observed = await ReadSnapshot(coordinator, "player");
+        Assert.Equal(24, Assert.Single(observed.Players).LatencyMilliseconds);
+
+        time.Advance(TimeSpan.FromSeconds(6));
+        observed = await ReadSnapshot(coordinator, "player");
+        Assert.Null(Assert.Single(observed.Players).LatencyMilliseconds);
+
+        await Complete(coordinator, coordinator.DisconnectAsync(original));
+        var replacement = coordinator.Admit("player");
+        var resumed = await Complete(coordinator, coordinator.JoinAsync(replacement, "Player", join.ResumeToken));
+        Assert.Equal(join.PlayerId, resumed.PlayerId);
+        Assert.Null(Assert.Single(resumed.Snapshot.Players).LatencyMilliseconds);
+
+        coordinator.UpdateLatency(original, 58, time.GetTimestamp());
+        observed = await ReadSnapshot(coordinator, "player");
+        Assert.Null(Assert.Single(observed.Players).LatencyMilliseconds);
+    }
+
+
+    [Fact]
     public async Task OldLeaseCommandsCannotAffectResumedSession()
     {
         using var coordinator = NewCoordinator();

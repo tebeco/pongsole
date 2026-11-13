@@ -23,6 +23,31 @@ public sealed class GameServerTests
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(10);
 
     [Fact]
+    public async Task ServerPublishesMeasuredRoundTripToAnotherRealClient()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await using var server = new TestGameServer(IPAddress.Loopback);
+        server.StartTicks();
+        await using var measured = server.Connect();
+        await using var observer = server.Connect();
+        var updates = new ConcurrentQueue<GameSnapshot>();
+        using var echo = measured.On<string, string>("LatencyProbe", nonce =>
+        {
+            server.Time.Advance(TimeSpan.FromMilliseconds(42));
+            return nonce;
+        });
+        using var subscription = observer.On<GameSnapshot>("Snapshot", updates.Enqueue);
+        await measured.StartAsync(cancellationToken).WaitAsync(Deadline, cancellationToken);
+        var player = await Join(measured, "Measured");
+        await observer.StartAsync(cancellationToken).WaitAsync(Deadline, cancellationToken);
+        var other = await Join(observer, "Observer");
+        var snapshot = await SnapshotWith(updates, state => state.Players.Any(candidate =>
+            candidate.PlayerId == player.PlayerId && candidate.LatencyMilliseconds == 42));
+        Assert.Null(snapshot.Players.Single(candidate => candidate.PlayerId == other.PlayerId).LatencyMilliseconds);
+    }
+
+
+    [Fact]
     public async Task RealClientsSharePaddlesAndReceiveOrderedAuthoritativeSnapshots()
     {
         await using var server = new TestGameServer(IPAddress.Loopback);

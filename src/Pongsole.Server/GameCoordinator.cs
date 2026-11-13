@@ -47,6 +47,18 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
         }
     }
 
+    internal void UpdateLatency(ConnectionLease lease, int? milliseconds, long measuredAt)
+    {
+        lock (gate)
+        {
+            if (!stopping && IsCurrent(lease))
+            {
+                lease.LatencyMilliseconds = milliseconds;
+                lease.LatencyMeasuredAt = measuredAt;
+            }
+        }
+    }
+
     public Task<JoinResult> JoinAsync(string connectionId, string displayName, string? resumeToken)
     {
         lock (gate)
@@ -243,7 +255,7 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
             return 0;
 
         session.AcceptedInputs.Enqueue(now);
-        PruneParticipation(session, now);
+       PruneParticipation(session, now);
         session.RecentPushes.Enqueue(now);
         var appliedTick = engine.State.Tick + 1;
         if (push.Direction == Direction.Up)
@@ -358,18 +370,22 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
 
     private GameSnapshot Snapshot(long now) => new(engine.State, connections.Values
         .Where(lease => lease.Session is not null)
-        .Select(lease => PlayerSnapshot(lease.Session!, now))
+        .Select(lease => PlayerSnapshot(lease, now))
         .OrderBy(player => player.Team)
         .ThenByDescending(player => player.RecentPushCount)
         .ThenBy(player => player.DisplayName, StringComparer.Ordinal)
         .ThenBy(player => player.PlayerId)
         .ToImmutableArray());
 
-    private PlayerState PlayerSnapshot(Session session, long now)
+    private PlayerState PlayerSnapshot(ConnectionLease lease, long now)
     {
+        var session = lease.Session!;
+        var latency = lease.LatencyMilliseconds is not null &&
+            time.GetElapsedTime(lease.LatencyMeasuredAt, now) < TimeSpan.FromSeconds(6)
+            ? lease.LatencyMilliseconds : null;
         PruneParticipation(session, now);
         return new PlayerState(session.PlayerId, session.DisplayName, session.Team, session.LastProcessedSequence,
-            session.RecentPushes.Count, session.LastUpTick, session.LastDownTick);
+            session.RecentPushes.Count, session.LastUpTick, session.LastDownTick, latency);
     }
 
     private void PruneParticipation(Session session, long now)
@@ -410,6 +426,8 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
     {
         internal string ConnectionId { get; } = connectionId;
         internal Session? Session { get; set; }
+        internal int? LatencyMilliseconds { get; set; }
+        internal long LatencyMeasuredAt { get; set; }
         internal Channel<GameSnapshot> Snapshots { get; } = Channel.CreateBounded<GameSnapshot>(
             new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
     }

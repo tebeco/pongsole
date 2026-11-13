@@ -20,6 +20,11 @@ internal sealed class GameHub(GameCoordinator coordinator, IHubContext<GameHub> 
         _ = SnapshotSender.RunAsync(lease.Snapshots.Reader,
             (snapshot, cancellationToken) => client.SendAsync("Snapshot", snapshot, cancellationToken),
             Context.Abort, time, Context.ConnectionAborted);
+        var latencyCoordinator = coordinator;
+        _ = LatencyMonitor.RunAsync(
+            (nonce, token) => client.InvokeAsync<string>("LatencyProbe", nonce, token),
+            (milliseconds, measuredAt) => latencyCoordinator.UpdateLatency(lease, milliseconds, measuredAt),
+            time, Context.ConnectionAborted);
         return Task.CompletedTask;
     }
 
