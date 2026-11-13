@@ -29,7 +29,7 @@ var app = builder.Build();
 var access = new GameAccess(app.Configuration);
 access.Apply(app);
 app.UseAuthentication();
-app.UseDefaultFiles();
+app.UseHomepage();
 app.UseStaticFiles();
 app.Services.GetRequiredService<BrowserAccess>().MapEndpoints(app, access);
 app.MapHub<GameHub>("/game");
