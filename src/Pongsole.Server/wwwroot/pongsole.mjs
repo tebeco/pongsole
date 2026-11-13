@@ -1,5 +1,6 @@
 import { drawArena } from "./arena.mjs";
 import { bindControls } from "./controls.mjs";
+import { initialInviteCode, inviteAccess } from "./invite.mjs";
 import { Movement } from "./movement.mjs";
 import { renderRosters, RosterActivity } from "./roster.mjs";
 import { clock, GameSession } from "./session.mjs";
@@ -38,11 +39,7 @@ function showRosters() {
 }
 
 const session = new GameSession({
-  access: async (signal, secret) => {
-    const result = await browserSession(signal, secret);
-    if (secret !== undefined && !signal.aborted) code.value = "";
-    return result;
-  },
+  access: inviteAccess(browserSession, location, window.history, () => { code.value = ""; }),
   socket: gameSocket,
   changed: show,
   clearMovement: disconnected => movement.clear(disconnected),
@@ -134,4 +131,4 @@ leave.addEventListener("click", () => {
 const resize = new ResizeObserver(queueFrame);
 resize.observe(arena);
 reduceMotion.addEventListener("change", queueFrame);
-void session.checkAccess();
+void session.checkAccess(initialInviteCode(location));
