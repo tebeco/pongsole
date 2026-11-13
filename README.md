@@ -49,6 +49,18 @@ to open the browser game. Use the same HTTP origin with `--server` to join
 from a terminal. Stop the
 foreground AppHost with **Ctrl+C**.
 
+### Play from dashboard terminals
+
+Start `terminal-1` and `terminal-2` from the dashboard when you want two
+terminal players. For each resource, open **Console logs** and select the
+**Terminal** view, or open the terminal from its resource menu. Each resource
+runs one player. Multiple views of the same terminal share that player.
+You can open a separate browser window for each terminal.
+
+Use **W/S** or **↑/↓** to move. Keep the terminal at least **80×24**.
+Press **Q/Esc** to leave and exit the resource. Select **Start** to rejoin.
+Closing a terminal view leaves its player running.
+
 ## Host a private game over HTTPS
 
 The Docker Compose example runs the server on an internal port and publishes
