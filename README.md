@@ -45,8 +45,10 @@ aspire run --apphost src/Pongsole.AppHost/Pongsole.AppHost.csproj
 ```
 
 In the Aspire dashboard, select **Play Pongsole** under the `server` resource
-to open the browser game. Use the same HTTP origin with `--server` to join
-from a terminal. Stop the
+to open the browser game. Aspire uses Private mode, so enter the shared code
+shown by revealing the `game-code` parameter in the dashboard. Set
+`PONGSOLE_SHARED_CODE` before starting Aspire to supply your own code.
+Use the same HTTPS origin and code to join from a separate terminal. Stop the
 foreground AppHost with **Ctrl+C**.
 
 ### Play from dashboard terminals
@@ -60,6 +62,23 @@ You can open a separate browser window for each terminal.
 Use **W/S** or **↑/↓** to move. Keep the terminal at least **80×24**.
 Press **Q/Esc** to leave and exit the resource. Select **Start** to rejoin.
 Closing a terminal view leaves its player running.
+
+### Share the game over the internet
+
+During a local Aspire run, the `cloudflared` resource starts after the game
+server is healthy. It downloads and verifies the pinned Cloudflare CLI for
+supported Windows x64, Linux x64/Arm64, and macOS x64/Arm64 hosts. Once the
+tunnel is ready, select **Play over Internet** on that resource and share the
+resulting HTTPS game URL. Share the game code separately.
+
+The homepage is public while the tunnel runs. Joining the arena requires the
+shared code, including when you use **Play Pongsole** locally in Aspire.
+Select **Stop** on `cloudflared` to close public access while keeping the
+local game running. Restarting the tunnel creates a new URL.
+
+Cloudflare Quick Tunnels are temporary development links. They require no
+account or domain, support up to 200 in-flight requests, and do not support
+Server-Sent Events. Pongsole's browser client uses WebSockets.
 
 ## Host a private game over HTTPS
 

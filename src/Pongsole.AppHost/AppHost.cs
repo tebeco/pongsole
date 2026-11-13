@@ -1,8 +1,10 @@
+using System.Security.Cryptography;
+
 var builder = DistributedApplication.CreateBuilder(args);
 
 var server = builder.AddProject<Projects.Pongsole_Server>("server")
     .WithHttpHealthCheck("/health")
-    .WithUrlForEndpoint("http", url =>
+    .WithUrlForEndpoint(builder.ExecutionContext.IsRunMode ? "https" : "http", url =>
     {
         url.DisplayText = "Play Pongsole";
         url.Url = "/";
@@ -10,13 +12,36 @@ var server = builder.AddProject<Projects.Pongsole_Server>("server")
 
 if (builder.ExecutionContext.IsRunMode)
 {
-    var serverEndpoint = server.GetEndpoint("http");
+    var configuredCode = Environment.GetEnvironmentVariable("PONGSOLE_SHARED_CODE");
+    var code = string.IsNullOrWhiteSpace(configuredCode)
+        ? Convert.ToHexString(RandomNumberGenerator.GetBytes(32))
+        : configuredCode;
+    var gameCode = builder.AddParameter("game-code", () => code, secret: true, publishValueAsDefault: false);
+
+    server.WithEnvironment("Pong__Mode", "Private")
+        .WithEnvironment("PONGSOLE_SHARED_CODE", gameCode)
+        .WithEnvironment("Pong__KnownProxies__0", "127.0.0.1")
+        .WithEnvironment("Pong__KnownProxies__1", "::1");
+
+    builder.AddProject<Projects.Pongsole_Tunnel>("cloudflared")
+        .WithHttpEndpoint(name: "http")
+        .WithUrlForEndpoint("http", url =>
+        {
+            url.DisplayText = "Play over Internet";
+            url.Url = "/";
+        })
+        .WithHttpHealthCheck("/health")
+        .WithEnvironment("Tunnel__Origin", server.GetEndpoint("http"))
+        .WaitFor(server);
+
+    var serverEndpoint = server.GetEndpoint("https");
     foreach (var (resourceName, playerName) in new[] { ("terminal-1", "Terminal 1"), ("terminal-2", "Terminal 2") })
     {
         // Aspire's interactive resource terminal API is experimental.
 #pragma warning disable ASPIRETERMINAL001
         builder.AddProject<Projects.Pongsole_Client>(resourceName)
             .WithArgs("--server", serverEndpoint, "--name", playerName)
+            .WithEnvironment("PONGSOLE_SHARED_CODE", gameCode)
             .WaitFor(server)
             .WithExplicitStart()
             .WithTerminal(options =>

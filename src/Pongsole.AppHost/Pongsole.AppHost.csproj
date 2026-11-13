@@ -9,5 +9,6 @@
     <PackageReference Include="Aspire.Hosting.AppHost" />
     <ProjectReference Include="../Pongsole.Client/Pongsole.Client.csproj" />
     <ProjectReference Include="../Pongsole.Server/Pongsole.Server.csproj" />
+    <ProjectReference Include="../Pongsole.Tunnel/Pongsole.Tunnel.csproj" />
   </ItemGroup>
 </Project>
