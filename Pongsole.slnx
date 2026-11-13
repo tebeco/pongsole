@@ -5,7 +5,6 @@
     <Project Path="src/Pongsole.Contracts/Pongsole.Contracts.csproj" />
     <Project Path="src/Pongsole.Core/Pongsole.Core.csproj" />
     <Project Path="src/Pongsole.Server/Pongsole.Server.csproj" />
-    <Project Path="src/Pongsole.ServiceDefaults/Pongsole.ServiceDefaults.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Pongsole.Client.Tests/Pongsole.Client.Tests.csproj" />

@@ -2,7 +2,13 @@
   <ItemGroup>
     <ProjectReference Include="../Pongsole.Contracts/Pongsole.Contracts.csproj" />
     <ProjectReference Include="../Pongsole.Core/Pongsole.Core.csproj" />
-    <ProjectReference Include="../Pongsole.ServiceDefaults/Pongsole.ServiceDefaults.csproj" />
     <InternalsVisibleTo Include="Pongsole.Server.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" />
   </ItemGroup>
 </Project>

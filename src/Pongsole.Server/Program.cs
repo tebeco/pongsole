@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using Pongsole.Contracts;
 using Pongsole.Core;
 using Pongsole.Server;
-using Pongsole.ServiceDefaults;
 
 var builder = WebApplication.CreateBuilder(args);
 if (string.IsNullOrWhiteSpace(builder.Configuration[WebHostDefaults.ServerUrlsKey]))
@@ -10,7 +9,8 @@ if (string.IsNullOrWhiteSpace(builder.Configuration[WebHostDefaults.ServerUrlsKe
 
 // Forwarding for the game endpoint is configured only through explicit known proxies.
 builder.Configuration["ForwardedHeaders_Enabled"] = "false";
-builder.AddServiceDefaults();
+builder.AddHealthChecks();
+OpenTelemetryExtensions.AddOpenTelemetry(builder);
 // Disable the SignalR dispatcher category because its diagnostics can include resume tokens.
 builder.Logging.AddFilter("Microsoft.AspNetCore.SignalR.Internal.DefaultHubDispatcher", LogLevel.None);
 // SignalR transport tokens also appear in request URLs and connection manager debug logs.
@@ -33,7 +33,7 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 app.Services.GetRequiredService<BrowserAccess>().MapEndpoints(app, access);
 app.MapHub<GameHub>("/game");
-app.MapDefaultEndpoints();
+app.MapHealthCheckEndpoints();
 app.Run();
 
 public partial class Program;
