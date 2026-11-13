@@ -22,8 +22,18 @@
           <div class="match"><span id="phase">Ready</span><small id="players">0 players</small></div>
           <div class="team right"><strong id="right-score">0</strong><span>Right</span></div>
         </div>
-        <div class="court">
-          <canvas id="arena" role="img" aria-label="Pong court with a paddle on each side and a ball">Pong court</canvas>
+        <div class="court-layout">
+          <section class="roster roster-left" aria-labelledby="roster-left-label">
+            <h2 id="roster-left-label">Left team</h2>
+            <ul id="roster-left"></ul>
+          </section>
+          <div class="court">
+            <canvas id="arena" role="img" aria-label="Pong court with a paddle on each side and a ball">Pong court</canvas>
+          </div>
+          <section class="roster roster-right" aria-labelledby="roster-right-label">
+            <h2 id="roster-right-label">Right team</h2>
+            <ul id="roster-right"></ul>
+          </section>
         </div>
         <p class="team-label" id="team-label">Join to play</p>
       </section>
@@ -31,7 +41,8 @@
         <form id="join-form" hidden>
           <h2>Join game</h2>
           <label for="display-name">Display name</label>
-          <input id="display-name" type="text" maxlength="24" autocomplete="nickname" required>
+          <input id="display-name" type="text" maxlength="10" pattern="[A-Za-z0-9]{1,10}" aria-describedby="name-rule" autocomplete="nickname" required>
+          <small id="name-rule">1–10 letters (A–Z, a–z) or digits (0–9).</small>
           <button class="primary" type="submit">Join game</button>
         </form>
         <form id="access-form" hidden>

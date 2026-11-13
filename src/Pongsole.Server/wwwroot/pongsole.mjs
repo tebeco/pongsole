@@ -1,6 +1,7 @@
 import { drawArena } from "./arena.mjs";
 import { bindControls } from "./controls.mjs";
 import { Movement } from "./movement.mjs";
+import { renderRosters, RosterActivity } from "./roster.mjs";
 import { clock, GameSession } from "./session.mjs";
 import { browserSession, gameSocket } from "./transport.mjs";
 
@@ -23,6 +24,18 @@ const controls = [...document.querySelectorAll("[data-direction]")];
 let lastAnnouncement = "";
 let previousState;
 let frameId;
+let rosterTimer;
+let rosterPlayers = [];
+const rosterActivity = new RosterActivity();
+const rosterLists = { left: byId("roster-left"), right: byId("roster-right") };
+
+function showRosters() {
+  clearTimeout(rosterTimer);
+  const now = performance.now();
+  renderRosters(rosterLists, rosterPlayers, rosterActivity, now);
+  const deadline = rosterActivity.nextDeadline(now);
+  if (Number.isFinite(deadline)) rosterTimer = setTimeout(showRosters, deadline - now);
+}
 
 const session = new GameSession({
   access: async (signal, secret) => {
@@ -59,6 +72,8 @@ function show() {
   byId("play-controls").hidden = !player;
   controls.forEach(button => { button.disabled = !session.canMove; });
   const snapshot = history.newest;
+  rosterPlayers = rosterActivity.update(snapshot, state === "playing", performance.now());
+  showRosters();
   const left = snapshot?.arena.leftScore ?? 0;
   const right = snapshot?.arena.rightScore ?? 0;
   const phase = snapshot?.arena.phase;

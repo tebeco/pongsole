@@ -1,3 +1,4 @@
+import { nameRule, validName } from "./roster.mjs";
 import { ArenaSnapshots } from "./arena.mjs";
 import { AccessError } from "./transport.mjs";
 
@@ -98,12 +99,11 @@ export class GameSession {
   }
 
   join(name) {
-    const trimmed = name.trim();
-    if (trimmed.length < 1 || trimmed.length > 24 || /[\u0000-\u001f\u007f-\u009f]/u.test(trimmed)) {
-      this.#show("ready", "Enter a display name of 1–24 characters without control characters.");
+    if (!validName(name)) {
+      this.#show("ready", nameRule);
       return;
     }
-    this.name = trimmed;
+    this.name = name;
     this.#retryIndex = 0;
     return this.checkAccess();
   }
@@ -200,7 +200,7 @@ export class GameSession {
     void this.#stop(previous);
     if (reason === "PONGSOLE_INVALID_NAME") {
       this.name = "";
-      this.#show("ready", "The server rejected the display name.");
+      this.#show("ready", nameRule);
       return;
     }
     const messages = {
