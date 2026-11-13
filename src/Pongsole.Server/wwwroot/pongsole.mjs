@@ -17,7 +17,7 @@ const code = byId("shared-code");
 const name = byId("display-name");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
 const labels = {
-  checking: "Checking access", ready: "Ready", access: "Private game", unavailable: "Access unavailable",
+  checking: "Checking access", ready: "Ready", access: "Access required", unavailable: "Access unavailable",
   connecting: "Connecting", reconnecting: "Reconnecting", playing: "Connected", terminal: "Connection ended",
 };
 const controls = [...document.querySelectorAll("[data-direction]")];
@@ -84,8 +84,9 @@ function show() {
   byId("phase").textContent = phase === "waiting" ? "Waiting for teams" :
     phase === "serving" ? `Serve in ${Math.max(0, snapshot.arena.serveTicksRemaining / 60).toFixed(1)}s` :
     phase === "playing" ? "Playing" : "Ready";
+  byId("team-label").hidden = !player;
   byId("team-label").dataset.team = player?.team ?? "";
-  byId("team-label").textContent = player ? `${session.name} · Team ${player.team === "left" ? "Left" : "Right"}` : "Join to play";
+  byId("team-label").textContent = player ? `${session.name} · Team ${player.team === "left" ? "Left" : "Right"}` : "";
   const announcement = [labels[state], phase === "waiting" ? "Waiting for both teams" :
     phase === "serving" ? "Serving" : phase === "playing" ? "Playing" : "",
     snapshot ? `Left ${left}, Right ${right}. ${players} ${players === 1 ? "player" : "players"}.` : "",

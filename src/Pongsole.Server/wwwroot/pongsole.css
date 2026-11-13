@@ -94,7 +94,6 @@ h2 { font-size: 1.05rem; letter-spacing: .02em; }
   border-radius: .2rem;
 }
 .roster-arrow[data-active="true"] { color: #090e17; background: var(--team-color); border-color: currentColor; }
-#name-rule { color: var(--muted); }
 .court { background: #080e19; }
 canvas { display: block; width: 100%; aspect-ratio: 100 / 30; }
 .team-label { font-size: .9rem; }
@@ -103,22 +102,37 @@ canvas { display: block; width: 100%; aspect-ratio: 100 / 30; }
 
 .game-controls form {
   display: grid;
-  grid-template-columns: minmax(0, 18rem) auto;
+  grid-template-columns: 6rem minmax(0, 16rem);
   align-items: center;
-  gap: .35rem .6rem;
-  flex: 1 1 25rem;
-}
-.game-controls form h2, .game-controls form label, #name-rule { grid-column: 1 / -1; }
-#name-rule { grid-row: 4; }
-.game-controls form button { grid-column: 2; grid-row: 3; }
-#access-form {
-  flex: 0 1 auto;
-  width: fit-content;
-  max-width: 100%;
+  gap: .5rem;
+  flex: 0 1 22.5rem;
   min-width: 0;
-  grid-template-columns: minmax(0, 16rem) max-content;
+  max-width: 100%;
 }
-#access-form button { justify-self: start; }
+.send-field { position: relative; min-width: 0; }
+.send-field input { padding-inline-end: 3rem; }
+.send-field button {
+  position: absolute;
+  inset: 0 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.send-field button:hover:not(:disabled) { color: var(--left); background: transparent; }
+.send-field button:focus-visible { outline-offset: -4px; }
+.send-field svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 label, #message { font-size: .9rem; }
 #message { color: var(--muted); flex-basis: 100%; }
 #message:empty { display: none; }
@@ -128,8 +142,6 @@ button { background: #1b293e; color: #eef4ff; padding: .6rem .85rem; font-weight
 button:hover:not(:disabled) { background: #263951; }
 button:disabled { opacity: .55; cursor: default; }
 button:focus-visible, input:focus-visible { outline: 3px solid var(--left); outline-offset: 3px; }
-button.primary { color: #062329; background: var(--left); border-color: var(--left); }
-button.primary:hover:not(:disabled) { background: #9af9fc; }
 .key-help { font-size: .8rem; }
 kbd { color: #fff; }
 #play-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem 1rem; }
@@ -146,10 +158,6 @@ kbd { color: #fff; }
 }
 @media (pointer: coarse), (max-width: 760px) {
   .directions { display: grid; }
-}
-@media (max-width: 480px) {
-  #access-form { width: min(100%, 16rem); grid-template-columns: minmax(0, 1fr); }
-  #access-form button { grid-column: 1; grid-row: 4; }
 }
 @media (max-width: 360px) {
   .team { flex-direction: column; gap: .2rem; }
