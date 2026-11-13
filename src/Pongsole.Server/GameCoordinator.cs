@@ -102,6 +102,50 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
         }
     }
 
+    internal Task SetHeldAsync(ConnectionLease lease, Direction? direction, long sequence)
+    {
+        lock (gate)
+        {
+            if (stopping)
+                throw GameErrors.ServerStopping();
+            if (direction is not (null or Direction.Up or Direction.Down))
+                throw GameErrors.InvalidDirection();
+            if (sequence <= 0)
+                throw GameErrors.InvalidSequence();
+            if (!IsCurrent(lease) || lease.Session is not { } session)
+                throw GameErrors.NotJoined();
+            if (sequence <= session.LastProcessedSequence)
+                return Task.CompletedTask;
+
+            session.LastProcessedSequence = sequence;
+            var held = lease.Held;
+            if (direction is null)
+            {
+                held.Direction = null;
+                return Task.CompletedTask;
+            }
+            if (engine.State.Phase == Phase.Waiting || leftCount == 0 || rightCount == 0)
+                return Task.CompletedTask;
+
+            var now = time.GetTimestamp();
+            while (held.Updates.TryPeek(out var timestamp) && time.GetElapsedTime(timestamp, now) >= RateWindow)
+                held.Updates.Dequeue();
+            if (held.Updates.Count == 40)
+                return Task.CompletedTask;
+
+            held.Updates.Enqueue(now);
+            held.RefreshedAt = now;
+            if (held.Direction != direction)
+            {
+                if (held.Pending.Count < 10)
+                    held.Pending.Enqueue(direction.Value);
+                held.Direction = direction;
+                held.NextRepeatTick = engine.State.Tick + 7;
+            }
+            return Task.CompletedTask;
+        }
+    }
+
     public Task DisconnectAsync(string connectionId)
     {
         lock (gate)
@@ -192,7 +236,10 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
             while (input.Reader.TryRead(out var push))
                 push.Completion.TrySetException(GameErrors.ServerStopping());
             foreach (var lease in connections.Values)
+            {
+                lease.Held.Clear();
                 lease.Snapshots.Writer.TryComplete();
+            }
             connections.Clear();
         }
     }
@@ -222,6 +269,18 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
                 push.Completion.TrySetResult(true);
             }
 
+            foreach (var lease in connections.Values)
+            {
+                if (lease.Session is not { } session)
+                    continue;
+
+                var impulse = ProcessHeld(lease.Held, session, canMove, now);
+                if (session.Team == Team.Left)
+                    leftPushes += impulse;
+                else
+                    rightPushes += impulse;
+            }
+
             var arena = engine.Advance(leftPushes, rightPushes, leftCount > 0, rightCount > 0);
             if (arena.Tick % 3 != 0)
                 return;
@@ -242,9 +301,35 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
             return 0;
 
         session.LastProcessedSequence = push.Sequence;
-        if (!canMove)
-            return 0;
+        return canMove ? ApplyImpulse(session, push.Direction, now) : 0;
+    }
 
+    private int ProcessHeld(HeldInput held, Session session, bool canMove, long now)
+    {
+        if (!canMove)
+        {
+            held.Clear();
+            return 0;
+        }
+        if (held.Direction is not null && time.GetElapsedTime(held.RefreshedAt, now) >= RateWindow)
+            held.Clear();
+
+        var impulse = 0;
+        var initial = held.Pending.Count > 0;
+        while (held.Pending.TryDequeue(out var direction))
+            impulse += ApplyImpulse(session, direction, now);
+
+        var tick = engine.State.Tick + 1;
+        if (!initial && held.Direction is { } repeating && tick >= held.NextRepeatTick)
+        {
+            impulse += ApplyImpulse(session, repeating, now);
+            held.NextRepeatTick = tick + 6;
+        }
+        return impulse;
+    }
+
+    private int ApplyImpulse(Session session, Direction direction, long now)
+    {
         while (session.AcceptedInputs.TryPeek(out var timestamp) &&
             time.GetElapsedTime(timestamp, now) >= RateWindow)
         {
@@ -255,14 +340,14 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
             return 0;
 
         session.AcceptedInputs.Enqueue(now);
-       PruneParticipation(session, now);
+        PruneParticipation(session, now);
         session.RecentPushes.Enqueue(now);
         var appliedTick = engine.State.Tick + 1;
-        if (push.Direction == Direction.Up)
+        if (direction == Direction.Up)
             session.LastUpTick = appliedTick;
         else
             session.LastDownTick = appliedTick;
-        return push.Direction == Direction.Up ? -1 : 1;
+        return direction == Direction.Up ? -1 : 1;
     }
 
     private JoinResult Join(ConnectionLease lease, string displayName, string? resumeToken, long now)
@@ -309,6 +394,7 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
             return;
 
         connections.Remove(lease.ConnectionId);
+        lease.Held.Clear();
         lease.Snapshots.Writer.TryComplete();
         if (lease.Session is not { } session)
             return;
@@ -426,10 +512,26 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
     {
         internal string ConnectionId { get; } = connectionId;
         internal Session? Session { get; set; }
+        internal HeldInput Held { get; } = new();
         internal int? LatencyMilliseconds { get; set; }
         internal long LatencyMeasuredAt { get; set; }
         internal Channel<GameSnapshot> Snapshots { get; } = Channel.CreateBounded<GameSnapshot>(
             new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
+    }
+
+    internal sealed class HeldInput
+    {
+        internal Direction? Direction { get; set; }
+        internal long RefreshedAt { get; set; }
+        internal long NextRepeatTick { get; set; }
+        internal Queue<Direction> Pending { get; } = new(10);
+        internal Queue<long> Updates { get; } = new(40);
+
+        internal void Clear()
+        {
+            Direction = null;
+            Pending.Clear();
+        }
     }
 
     internal sealed class Session(Guid playerId, string displayName, Team team, string token)

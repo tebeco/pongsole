@@ -12,6 +12,92 @@ public sealed class GameCoordinatorTests
     private GameCoordinator NewCoordinator() => new(engine, time, new Random(2));
 
     [Fact]
+    public async Task HeldAndDiscreteInputsShareTheImpulseLimitAndOppositesCancel()
+    {
+        using var coordinator = NewCoordinator();
+        var first = coordinator.Admit("first");
+        var second = coordinator.Admit("second");
+        var third = coordinator.Admit("third");
+        var one = await Complete(coordinator, coordinator.JoinAsync(first, "First", null));
+        await Complete(coordinator, coordinator.JoinAsync(second, "Second", null));
+        var three = await Complete(coordinator, coordinator.JoinAsync(third, "Third", null));
+        var teammate = one.Team == three.Team ? first : second;
+        var teammateId = teammate == first ? one.PlayerId :
+            three.Snapshot.Players.Single(player => player.DisplayName == "Second").PlayerId;
+
+        await coordinator.SetHeldAsync(teammate, Direction.Up, 1);
+        await coordinator.SetHeldAsync(third, Direction.Down, 1);
+        for (var tick = 0; tick < 49; tick++)
+        {
+            time.Advance(TimeSpan.FromMilliseconds(16));
+            coordinator.Tick();
+        }
+        var discrete = Enumerable.Range(2, 10)
+            .Select(sequence => coordinator.PushAsync(third, Direction.Down, sequence)).ToArray();
+        coordinator.Tick();
+        await Task.WhenAll(discrete);
+        var observed = await ReadSnapshot(coordinator, "third");
+        var paddle = three.Team == Team.Left ? observed.Arena.LeftPaddle : observed.Arena.RightPaddle;
+        Assert.Equal(9, observed.Players.Single(player => player.PlayerId == teammateId).RecentPushCount);
+        Assert.Equal(10, observed.Players.Single(player => player.PlayerId == three.PlayerId).RecentPushCount);
+        Assert.Equal(11, observed.Players.Single(player => player.PlayerId == three.PlayerId).LastProcessedSequence);
+        Assert.InRange(paddle.Y, 15, 15.1);
+    }
+
+
+    [Fact]
+    public async Task HeldStateRepeatsWithoutHeartbeatImpulsesAndExpires()
+    {
+        using var coordinator = NewCoordinator();
+        var lease = coordinator.Admit("player");
+        coordinator.Admit("opponent");
+        var join = await Complete(coordinator, coordinator.JoinAsync(lease, "Player", null));
+        await Complete(coordinator, coordinator.JoinAsync("opponent", "Opponent", null));
+
+        await coordinator.SetHeldAsync(lease, Direction.Up, 1);
+        for (var tick = 0; tick < 60; tick++)
+        {
+            time.Advance(TimeSpan.FromMilliseconds(16));
+            coordinator.Tick();
+        }
+        var snapshot = await ReadSnapshot(coordinator, "player");
+        PlayerState Player(GameSnapshot state) => state.Players.Single(candidate => candidate.PlayerId == join.PlayerId);
+        Assert.Equal(10, Player(snapshot).RecentPushCount);
+        Assert.NotNull(Player(snapshot).LastUpTick);
+
+        time.Advance(TimeSpan.FromSeconds(1));
+        await coordinator.SetHeldAsync(lease, Direction.Up, 1);
+        var expired = await ReadSnapshot(coordinator, "player");
+        Assert.Equal(Player(snapshot).LastUpTick, Player(expired).LastUpTick);
+        Assert.Equal(1, Player(expired).LastProcessedSequence);
+    }
+
+    [Fact]
+    public async Task HeldTapSurvivesReleaseWithinTickAndNeutralBypassesUpdateCap()
+    {
+        using var coordinator = NewCoordinator();
+        var lease = coordinator.Admit("player");
+        coordinator.Admit("opponent");
+        var join = await Complete(coordinator, coordinator.JoinAsync(lease, "Player", null));
+        await Complete(coordinator, coordinator.JoinAsync("opponent", "Opponent", null));
+
+        for (var sequence = 1; sequence <= 40; sequence++)
+            await coordinator.SetHeldAsync(lease, Direction.Down, sequence);
+        await coordinator.SetHeldAsync(lease, Direction.Up, 41);
+        await coordinator.SetHeldAsync(lease, null, 42);
+        for (var tick = 0; tick < 18; tick++)
+            coordinator.Tick();
+
+        var observed = await ReadSnapshot(coordinator, "player");
+        var player = observed.Players.Single(candidate => candidate.PlayerId == join.PlayerId);
+        Assert.Equal(42, player.LastProcessedSequence);
+        Assert.Equal(1, player.RecentPushCount);
+        Assert.NotNull(player.LastDownTick);
+        Assert.Null(player.LastUpTick);
+    }
+
+
+    [Fact]
     public async Task LatencyExpiresAndNeverSurvivesAConnectionLease()
     {
         using var coordinator = NewCoordinator();

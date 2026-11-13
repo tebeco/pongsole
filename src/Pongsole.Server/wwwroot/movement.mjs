@@ -1,6 +1,4 @@
-const pulseInterval = 100;
-const maxQueue = 10;
-const sendWindow = 1_000;
+const heartbeatInterval = 250;
 
 export function keyDirection(key) {
   switch (key.toLowerCase()) {
@@ -14,12 +12,10 @@ export function keyDirection(key) {
 
 export class Movement {
   #held = new Map();
-  #queue = [];
-  #sendTimes = [];
-  #holdTimer;
-  #sendTimer;
+  #timer;
+  #pending;
   #sending = false;
-  #sendGeneration = 0;
+  #generation = 0;
 
   constructor({ time, enabled, send, changed = () => {} }) {
     this.time = time;
@@ -37,75 +33,63 @@ export class Movement {
   get #direction() {
     const up = this.isHeld("up");
     const down = this.isHeld("down");
-    return up === down ? undefined : up ? "up" : "down";
+    return up === down ? null : up ? "up" : "down";
   }
 
   press(id, direction) {
     if (!this.enabled() || this.#held.has(id)) return;
     const previous = this.#direction;
     this.#held.set(id, direction);
-    this.#updateHold(previous);
+    this.#update(previous);
   }
 
   release(id) {
     const previous = this.#direction;
-    if (this.#held.delete(id)) this.#updateHold(previous, false);
+    if (this.#held.delete(id)) this.#update(previous);
   }
 
   pulse(direction) {
-    if (!this.enabled() || this.#queue.length >= maxQueue) return;
-    this.#queue.push(direction);
+    if (!this.enabled() || this.#held.size) return;
+    this.#queue(direction);
+    this.#queue(null);
+  }
+
+  #update(previous) {
+    const direction = this.#direction;
+    this.changed();
+    if (direction === previous) return;
+    this.time.clear(this.#timer);
+    this.#queue(direction);
+    if (direction !== null) this.#scheduleHeartbeat();
+  }
+
+  #scheduleHeartbeat() {
+    this.#timer = this.time.set(() => {
+      const direction = this.#direction;
+      if (!this.enabled() || direction === null) return;
+      this.#queue(direction);
+      this.#scheduleHeartbeat();
+    }, heartbeatInterval);
+  }
+
+  #queue(direction) {
+    this.#pending = direction;
     this.#drain();
   }
 
-  #updateHold(previous, initial = true) {
-    this.changed();
-    const direction = this.#direction;
-    if (direction === previous) return;
-    this.time.clear(this.#holdTimer);
-    this.#holdTimer = undefined;
-    if (!direction) {
-      if (this.#held.size) this.#queue = [];
-      return;
-    }
-    if (initial) this.pulse(direction);
-    this.#holdTimer = this.time.set(() => this.#repeat(), pulseInterval);
-  }
-
-  #repeat() {
-    this.#holdTimer = undefined;
-    const direction = this.#direction;
-    if (!this.enabled() || !direction) return;
-    this.pulse(direction);
-    this.#holdTimer = this.time.set(() => this.#repeat(), pulseInterval);
-  }
-
   #drain() {
-    if (this.#sending || this.#sendTimer !== undefined || !this.#queue.length || !this.enabled()) return;
-    const now = this.time.now();
-    this.#sendTimes = this.#sendTimes.filter(sent => now - sent < sendWindow);
-    const lastSend = this.#sendTimes.at(-1) ?? -Infinity;
-    const delay = Math.max(lastSend + pulseInterval - now,
-      this.#sendTimes.length >= 10 ? this.#sendTimes[0] + sendWindow - now : 0);
-    if (delay > 0) {
-      this.#sendTimer = this.time.set(() => {
-        this.#sendTimer = undefined;
-        this.#drain();
-      }, delay);
-      return;
-    }
-
-    this.#sendTimes.push(now);
+    if (this.#sending || this.#pending === undefined) return;
+    const direction = this.#pending;
+    this.#pending = undefined;
     this.#sending = true;
-    const generation = this.#sendGeneration;
-    void this.#sendNext(this.#queue.shift(), generation);
+    void this.#sendNext(direction, this.#generation);
   }
 
   async #sendNext(direction, generation) {
     try {
       await this.send(direction);
     } finally {
-      if (generation === this.#sendGeneration) {
+      if (generation === this.#generation) {
         this.#sending = false;
         this.#drain();
       }
@@ -113,15 +97,18 @@ export class Movement {
   }
 
   clear(disconnected = false) {
+    const previous = this.#direction;
+    const needsNeutral = previous !== null || this.#pending === null;
     this.#held.clear();
-    this.#queue = [];
-    this.time.clear(this.#holdTimer);
-    this.time.clear(this.#sendTimer);
-    this.#holdTimer = this.#sendTimer = undefined;
+    this.time.clear(this.#timer);
     if (disconnected) {
-      this.#sendGeneration++;
+      this.#generation++;
+      this.#pending = undefined;
       this.#sending = false;
+    } else if (previous !== null) {
+      this.#queue(null);
     }
     this.changed();
+    return needsNeutral;
   }
 }

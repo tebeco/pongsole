@@ -83,12 +83,16 @@ h2 { font-size: 1.05rem; letter-spacing: .02em; }
   min-height: 1.75rem;
   font-size: .8rem;
 }
+.roster li > :first-child { grid-column: 1 / -1; min-width: 0; }
 .roster-name { overflow-wrap: anywhere; }
+.roster-arrow[data-roster-direction="up"] { grid-column: 2; }
+.roster-arrow[data-roster-direction="down"] { grid-column: 3; }
 .roster-latency {
   display: inline-block;
-  margin-inline-start: .25rem;
+  margin-inline-start: .2rem;
   color: var(--muted);
-  font-size: .7rem;
+  font-size: .65rem;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .roster-arrow {

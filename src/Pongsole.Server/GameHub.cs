@@ -12,6 +12,8 @@ internal sealed class GameHub(GameCoordinator coordinator, IHubContext<GameHub> 
 
     public Task Push(Direction direction, long sequence) => coordinator.PushAsync(Lease, direction, sequence);
 
+    public Task SetHeld(Direction? direction, long sequence) => coordinator.SetHeldAsync(Lease, direction, sequence);
+
     public override Task OnConnectedAsync()
     {
         var lease = coordinator.Admit(Context.ConnectionId);

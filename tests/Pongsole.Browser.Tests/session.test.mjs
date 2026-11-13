@@ -41,9 +41,15 @@ class Socket {
   async stop() { this.stops++; this.state = "Disconnected"; }
   close(error) { this.state = "Disconnected"; this.closed(error); }
 
+  async send(method, ...args) {
+    assert.equal(method, "SetHeld");
+    this.calls.push([method, ...args]);
+    return this.push(...args);
+  }
   async invoke(method, ...args) {
     this.calls.push([method, ...args]);
-    return method === "Join" ? this.join(...args) : this.push(...args);
+    assert.equal(method, "Join");
+    return this.join(...args);
   }
 }
 
@@ -74,7 +80,7 @@ test("reconciles early and same-tick snapshots and uses the next processed seque
   socket.snapshot(snapshot(8, 99));
   socket.snapshot(snapshot(9, 10));
   await session.send("down");
-  assert.deepEqual(socket.calls, [["Join", "Alice", null], ["Push", "up", 8], ["Push", "down", 11]]);
+  assert.deepEqual(socket.calls, [["Join", "Alice", null], ["SetHeld", "up", 8], ["SetHeld", "down", 11]]);
   assert.equal(session.history.newest.arena.tick, 9);
 });
 
@@ -95,7 +101,7 @@ test("reconnect checks access, preserves token and sequence, accepts lower tick 
   assert.deepEqual(resumed.calls, [["Join", "Player", "resume-one"]]);
   assert.equal(run.session.history.newest.arena.tick, 2);
   await run.session.send("down");
-  assert.deepEqual(resumed.calls.at(-1), ["Push", "down", 6]);
+  assert.deepEqual(resumed.calls.at(-1), ["SetHeld", "down", 6]);
   assert.equal(run.accessCalls.length, 2);
   assert.equal(run.session.state, "playing");
 });
@@ -131,13 +137,13 @@ for (const marker of ["PONGSOLE_INVALID_RESUME_TOKEN", "PONGSOLE_EXPIRED_RESUME_
     first.close();
     await time.advance(0);
     await session.send("up");
-    assert.deepEqual(resumed.calls, [["Join", "Player", "resume-one"], ["Join", "Player", null], ["Push", "up", 3]]);
+    assert.deepEqual(resumed.calls, [["Join", "Player", "resume-one"], ["Join", "Player", null], ["SetHeld", "up", 3]]);
   });
 }
 
-test("active conflict is terminal, while capacity backs off and queue full consumes one send", async () => {
+test("capacity backs off before sending held state and active conflict is terminal", async () => {
   const first = new Socket(() => { throw fault("PONGSOLE_CAPACITY_REACHED"); });
-  const next = new Socket(() => player(1), () => { throw fault("PONGSOLE_INPUT_QUEUE_FULL"); });
+  const next = new Socket(() => player(1));
   const conflict = new Socket(() => { throw fault("PONGSOLE_SESSION_ALREADY_CONNECTED"); });
   const { session, time } = fixture([first, next, conflict]);
   await session.join("Player");
@@ -147,7 +153,7 @@ test("active conflict is terminal, while capacity backs off and queue full consu
   await time.advance(1);
   await session.send("up");
   await session.send("up");
-  assert.deepEqual(next.calls.slice(1), [["Push", "up", 1], ["Push", "up", 2]]);
+  assert.deepEqual(next.calls.slice(1), [["SetHeld", "up", 1], ["SetHeld", "up", 2]]);
   next.close();
   await time.advance(0);
   assert.equal(session.state, "terminal");
