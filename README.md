@@ -83,8 +83,9 @@ Closing a terminal view leaves its player running.
 During a local Aspire run, the `cloudflared` resource starts after the game
 server is healthy. It downloads and verifies the pinned Cloudflare CLI for
 supported Windows x64, Linux x64/Arm64, and macOS x64/Arm64 hosts. Once the
-tunnel is ready, select **Play over Internet** on that resource and share the
-resulting HTTPS game URL. Share the game code separately.
+tunnel is ready, right-click **Play over Internet** on that resource and copy
+the link address. The public HTTPS link includes the current code and unlocks
+the browser on opening. Share it privately with the people you want to invite.
 
 The homepage is public while the tunnel runs. Joining the arena requires the
 shared code, including when you use **Play Pongsole** locally in Aspire.

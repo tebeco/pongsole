@@ -6,6 +6,7 @@
     <AspireUseCliBundle>true</AspireUseCliBundle>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Pongsole.AppHost.Tests" />
     <PackageReference Include="Aspire.Hosting.AppHost" />
     <ProjectReference Include="../Pongsole.Client/Pongsole.Client.csproj" />
     <ProjectReference Include="../Pongsole.Server/Pongsole.Server.csproj" />
