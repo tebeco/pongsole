@@ -16,7 +16,8 @@ public sealed class GameEngine
     private const double MaxBallSpeed = 45;
     private const double MaxReboundAngle = Math.PI / 3;
     private const double CoincidentContactTolerance = 1e-12;
-    private const double MaxPaddleSpeed = 24;
+    private const double PaddleImpulse = 7.2;
+    private const double MaxPaddleSpeed = 72;
     private const int ServeCountdown = 60;
     private const double ServeSpeed = 24;
     private const double MaxServeAngle = Math.PI / 6;
@@ -306,7 +307,7 @@ public sealed class GameEngine
     {
         const double minY = PaddleHalfHeight;
         const double maxY = ArenaHeight - PaddleHalfHeight;
-        var velocity = Math.Clamp(paddle.Velocity + 2.4 * pushes, -MaxPaddleSpeed, MaxPaddleSpeed);
+        var velocity = Math.Clamp(paddle.Velocity + PaddleImpulse * pushes, -MaxPaddleSpeed, MaxPaddleSpeed);
         var y = Math.Clamp(paddle.Y + velocity * TickDuration, minY, maxY);
         if ((y == minY && velocity < 0) || (y == maxY && velocity > 0))
         {
