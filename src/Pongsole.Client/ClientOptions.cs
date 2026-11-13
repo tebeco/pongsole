@@ -1,3 +1,5 @@
+using Pongsole.Contracts;
+
 namespace Pongsole.Client;
 
 internal sealed record ClientOptions(Uri? Endpoint, string? Name)
@@ -21,7 +23,7 @@ internal sealed record ClientOptions(Uri? Endpoint, string? Name)
                     endpoint = ParseEndpoint(value);
                     break;
                 case "--name" when name is null:
-                    name = value.Trim();
+                    name = value;
                     break;
                 default:
                     throw new ArgumentException("Usage: Pongsole.Client [--server URL] [--name DISPLAYNAME]");
@@ -73,12 +75,11 @@ internal sealed record ClientOptions(Uri? Endpoint, string? Name)
 
     public static string ParseName(string value)
     {
-        var name = value.Trim();
-        if (name.Length is < 1 or > 24 || name.Any(char.IsControl))
+        if (!PlayerName.IsValid(value))
         {
-            throw new ArgumentException("Enter a display name of 1–24 characters without control characters.");
+            throw new ArgumentException(PlayerName.ValidationMessage);
         }
 
-        return name;
+        return value;
     }
 }

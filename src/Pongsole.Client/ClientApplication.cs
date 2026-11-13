@@ -184,7 +184,7 @@ internal sealed class ClientApplication(
 
                 var (width, height) = terminal.Size;
                 var canMove = GameRenderer.Fits(width, height) && view.Arena?.Phase is Phase.Serving or Phase.Playing;
-                terminal.Draw(GameRenderer.Draw(width, height, view.Arena, view.PlayerCount, player.Team, "Connected"));
+                terminal.Draw(GameRenderer.Draw(width, height, view.Arena, view.Players, player.Team, "Connected"));
                 if (!canMove)
                 {
                     movements.Clear();
@@ -220,7 +220,7 @@ internal sealed class ClientApplication(
     private static async Task SendAsync(IGameConnection connection, PlayerSession player, SnapshotHistory history,
         Direction direction, CancellationToken cancellationToken)
     {
-        var sequence = player.NextSequence(history.Read().LastProcessed);
+        var sequence = player.NextSequence(history.LastProcessed);
         await connection.PushAsync(direction, sequence, cancellationToken);
     }
 
@@ -232,9 +232,9 @@ internal sealed class ClientApplication(
         {
             cancellationToken.ThrowIfCancellationRequested();
             DiscardKeys();
-            var view = history.Read();
+            var view = history.Read(showActivity: false);
             var (width, height) = terminal.Size;
-            terminal.Draw(GameRenderer.Draw(width, height, view.Arena, view.PlayerCount, team, status));
+            terminal.Draw(GameRenderer.Draw(width, height, view.Arena, view.Players, team, status));
             if (task.IsCompleted)
             {
                 break;
