@@ -27,7 +27,8 @@ internal sealed class RosterActivity(TimeProvider clock)
     {
         activity.TryGetValue(player.PlayerId, out var pulses);
         return new RosterPlayer(player.DisplayName, player.Team,
-            showActivity && IsLit(pulses.Up, timestamp), showActivity && IsLit(pulses.Down, timestamp));
+            showActivity && IsLit(pulses.Up, timestamp), showActivity && IsLit(pulses.Down, timestamp),
+            player.LatencyMilliseconds);
     }
 
     private bool IsLit(Pulse pulse, long timestamp) =>

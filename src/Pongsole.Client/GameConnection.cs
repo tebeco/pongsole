@@ -17,6 +17,7 @@ internal sealed class GameConnection : IGameConnection
 {
     private readonly HubConnection connection;
     private readonly IDisposable snapshotSubscription;
+    private readonly IDisposable latencySubscription;
     private readonly TaskCompletionSource<Exception?> closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public GameConnection(Uri endpoint, string? code, Action<GameSnapshot> onSnapshot)
@@ -47,6 +48,7 @@ internal sealed class GameConnection : IGameConnection
             return Task.CompletedTask;
         };
         snapshotSubscription = connection.On("Snapshot", onSnapshot);
+        latencySubscription = connection.On<string, string>("LatencyProbe", nonce => nonce);
     }
 
     public bool IsConnected => connection.State == HubConnectionState.Connected && connection.ConnectionId is not null;
@@ -87,6 +89,7 @@ internal sealed class GameConnection : IGameConnection
             return Task.CompletedTask;
         };
         snapshotSubscription.Dispose();
+        latencySubscription.Dispose();
         await connection.DisposeAsync();
     }
 

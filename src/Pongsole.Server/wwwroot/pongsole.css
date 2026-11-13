@@ -84,6 +84,13 @@ h2 { font-size: 1.05rem; letter-spacing: .02em; }
   font-size: .8rem;
 }
 .roster-name { overflow-wrap: anywhere; }
+.roster-latency {
+  display: inline-block;
+  margin-inline-start: .25rem;
+  color: var(--muted);
+  font-size: .7rem;
+  white-space: nowrap;
+}
 .roster-arrow {
   display: inline-grid;
   place-items: center;

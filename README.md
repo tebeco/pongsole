@@ -7,6 +7,8 @@ join the smaller team, with ties decided randomly.
 Team rosters flank the arena. On smaller browser screens, they appear side by
 side below the court. Players with more accepted pushes in the last 10 seconds
 appear first. Each accepted push briefly lights the player's Up or Down arrow.
+The number next to each name is the server's measured round-trip time in milliseconds.
+Probes run about every two seconds. A dash means a measurement is unavailable.
 Pressing faster adds the same push more often, up to 10 accepted presses per
 second per player. Paddle movement still slows over time and has a speed cap.
 The game serves when both teams have a player and keeps score until the server

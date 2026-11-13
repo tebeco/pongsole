@@ -6,7 +6,7 @@ internal static class GameRenderer
 {
     public const int MinimumWidth = 80;
     public const int MinimumHeight = 24;
-    private const int RosterWidth = PlayerName.MaximumLength + 7;
+    private const int RosterWidth = PlayerName.MaximumLength + 9;
 
     public static bool Fits(int width, int height) => width >= MinimumWidth && height >= MinimumHeight;
 
@@ -70,13 +70,16 @@ internal static class GameRenderer
         var lines = new string[height];
         lines[0] = team == Team.Left ? "LEFT TEAM" : "RIGHT TEAM";
         var available = height - 1;
-        var visible = members.Length <= available ? members.Length : available - 1;
+        var visible = members.Length <= available / 2 ? members.Length : (available - 1) / 2;
         for (var index = 0; index < visible; index++)
         {
             var player = members[index];
             var up = player.Up ? "[^]" : " ^ ";
             var down = player.Down ? "[v]" : " v ";
-            lines[index + 1] = $"{player.Name,-PlayerName.MaximumLength} {up}{down}";
+            var latency = player.LatencyMilliseconds is int milliseconds
+                ? FormattableString.Invariant($"({milliseconds}ms)") : "(—)";
+            lines[2 * index + 1] = $"{player.Name} {latency}";
+            lines[2 * index + 2] = (up + down).PadLeft(RosterWidth);
         }
 
         if (visible < members.Length)
@@ -100,4 +103,4 @@ internal static class GameRenderer
         (int)Math.Round(Math.Clamp(position / extent, 0, 1) * (cells - 1));
 }
 
-internal readonly record struct RosterPlayer(string Name, Team Team, bool Up = false, bool Down = false);
+internal readonly record struct RosterPlayer(string Name, Team Team, bool Up = false, bool Down = false, int? LatencyMilliseconds = null);

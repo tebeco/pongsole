@@ -135,6 +135,7 @@ export class GameSession {
     try {
       const connection = this.socket();
       attempt.connection = connection;
+      connection.on("LatencyProbe", nonce => nonce);
       connection.on("Snapshot", snapshot => {
         if (!this.#isCurrent(attempt)) return;
         if (joined) this.#accept(snapshot);

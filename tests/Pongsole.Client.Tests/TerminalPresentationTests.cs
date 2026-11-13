@@ -62,7 +62,7 @@ public sealed class TerminalPresentationTests
 
         RosterPlayer[] players = [new("One", Team.Left), new("Two", Team.Left), new("Three", Team.Right)];
         var lines = GameRenderer.Draw(80, 24, arena, players, Team.Left, "Connected");
-        var board = lines.Skip(3).TakeWhile(line => line.Length >= 61).Select(line => line.Substring(18, 43)).Where(line => line.StartsWith('|')).ToArray();
+        var board = lines.Skip(3).TakeWhile(line => line.Length >= 59).Select(line => line.Substring(20, 39)).Where(line => line.StartsWith('|')).ToArray();
 
         Assert.All(lines, line => Assert.True(line.Length < 80));
         Assert.True(lines.Length < 24);
@@ -98,18 +98,20 @@ public sealed class TerminalPresentationTests
     public void TeamColumnsKeepAuthoritativeOrderAndReserveLastRowForOverflow()
     {
         var arena = SnapshotHistoryTests.Snapshot(0, 50, []).Arena;
-        var players = new List<RosterPlayer> { new("Zed1234567", Team.Left, Up: true), new("Right1", Team.Right, Down: true) };
+        var players = new List<RosterPlayer> { new("Zed1234567", Team.Left, Up: true, LatencyMilliseconds: 2000), new("Right1", Team.Right, Down: true, LatencyMilliseconds: 0) };
         players.AddRange(Enumerable.Range(1, 16).Select(index => new RosterPlayer($"Left{index}", Team.Left)));
         var lines = GameRenderer.Draw(80, 24, arena, players, Team.Right, "Connected");
 
         Assert.StartsWith("LEFT TEAM", lines[3]);
-        Assert.Equal("RIGHT TEAM", lines[3][62..].TrimEnd());
-        Assert.Equal("Zed1234567 [^] v ", lines[4][..17]);
-        Assert.Equal("Right1      ^ [v]", lines[4][62..]);
-        Assert.StartsWith("Left1", lines[5]);
-        Assert.StartsWith("Left13 ", lines[17]);
-        Assert.StartsWith("+3 more", lines[18]);
-        Assert.DoesNotContain(lines, line => line.StartsWith("Left14 "));
+        Assert.Equal("RIGHT TEAM", lines[3][60..].TrimEnd());
+        Assert.Equal("Zed1234567 (2000ms)", lines[4][..19]);
+        Assert.Equal("Right1 (0ms)", lines[4][60..].TrimEnd());
+        Assert.EndsWith("[^] v ", lines[5][..19]);
+        Assert.EndsWith(" ^ [v]", lines[5]);
+        Assert.StartsWith("Left1 (—)", lines[6]);
+        Assert.StartsWith("Left6 ", lines[16]);
+        Assert.StartsWith("+10 more", lines[18]);
+        Assert.DoesNotContain(lines, line => line.StartsWith("Left7 "));
         Assert.All(lines, line => Assert.True(line.Length <= 79));
     }
 }
