@@ -14,11 +14,10 @@ export function withoutInviteCode(location) {
   return location.origin + location.pathname + location.search + (hash ? "#" + hash : "");
 }
 
-export function inviteAccess(request, location, history, clearCode) {
+export function inviteAccess(request, location, history) {
   return async (signal, code) => {
     const result = await request(signal, code);
     if (code !== undefined && !signal.aborted) {
-      clearCode();
       const cleaned = withoutInviteCode(location);
       if (cleaned !== undefined) history.replaceState(history.state, "", cleaned);
     }

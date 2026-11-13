@@ -18,25 +18,7 @@
     <section class="game" aria-label="Pong arena">
       <header class="game-controls" aria-label="Game controls">
         <p class="team-label" id="team-label" hidden></p>
-        <form id="join-form" hidden>
-          <label for="display-name">Enter name:</label>
-          <div class="send-field">
-            <input id="display-name" type="text" maxlength="10" pattern="[A-Za-z0-9]{1,10}" aria-describedby="name-rule" autocomplete="nickname" required>
-            <button type="submit" aria-label="Send name">
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 11.5 21 3l-8.5 18-2-7.5L3 11.5Zm7.5 2L21 3"/></svg>
-            </button>
-          </div>
-          <small class="visually-hidden" id="name-rule">1–10 letters (A–Z, a–z) or digits (0–9).</small>
-        </form>
-        <form id="access-form" hidden>
-          <label for="shared-code">Enter code:</label>
-          <div class="send-field">
-            <input id="shared-code" type="password" autocomplete="off" required>
-            <button type="submit" aria-label="Send code">
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 11.5 21 3l-8.5 18-2-7.5L3 11.5Zm7.5 2L21 3"/></svg>
-            </button>
-          </div>
-        </form>
+        <button id="play-again" type="button" hidden>Play again</button>
         <button id="retry" type="button" hidden>Try again</button>
         <div id="play-controls" hidden>
           <p class="key-help"><kbd>W</kbd> <kbd>↑</kbd> Up <span aria-hidden="true">/</span> <kbd>S</kbd> <kbd>↓</kbd> Down</p>

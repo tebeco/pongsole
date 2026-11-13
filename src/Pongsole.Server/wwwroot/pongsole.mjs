@@ -1,6 +1,7 @@
 import { drawArena } from "./arena.mjs";
 import { bindControls } from "./controls.mjs";
 import { initialInviteCode, inviteAccess } from "./invite.mjs";
+import { pickNickname } from "./nicknames.mjs";
 import { Movement } from "./movement.mjs";
 import { renderRosters, RosterActivity } from "./roster.mjs";
 import { clock, GameSession } from "./session.mjs";
@@ -9,13 +10,10 @@ import { browserSession, gameSocket } from "./transport.mjs";
 const byId = id => document.getElementById(id);
 const arena = byId("arena");
 const connection = byId("connection");
-const joinForm = byId("join-form");
-const accessForm = byId("access-form");
+const playAgain = byId("play-again");
 const retry = byId("retry");
 const leave = byId("leave");
 const message = byId("message");
-const code = byId("shared-code");
-const name = byId("display-name");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
 const labels = {
   checking: "Checking access", ready: "Ready", access: "Access required", unavailable: "Access unavailable",
@@ -39,7 +37,7 @@ function showRosters() {
 }
 
 const session = new GameSession({
-  access: inviteAccess(browserSession, location, window.history, () => { code.value = ""; }),
+  access: inviteAccess(browserSession, location, window.history),
   socket: gameSocket,
   changed: show,
   clearMovement: disconnected => movement.clear(disconnected),
@@ -62,10 +60,9 @@ function show() {
   connection.textContent = labels[state];
   connection.dataset.state = state;
   message.textContent = detail;
-  joinForm.hidden = state !== "ready";
-  accessForm.hidden = state !== "access";
+  playAgain.hidden = state !== "ready";
   retry.hidden = state !== "unavailable";
-  leave.hidden = !session.name && state !== "terminal";
+  leave.hidden = !["connecting", "reconnecting", "playing", "terminal"].includes(state);
   byId("play-controls").hidden = !player;
   controls.forEach(button => { button.disabled = !session.canMove; });
   const snapshot = history.newest;
@@ -94,8 +91,7 @@ function show() {
   }
 
   if (previousState !== state) {
-    if (state === "access") code.focus();
-    if (state === "ready" && previousState !== undefined) name.focus();
+    if (state === "ready") playAgain.focus();
     if (state === "playing") leave.focus();
     if (state === "terminal") leave.focus();
     previousState = state;
@@ -114,21 +110,11 @@ function queueFrame() {
   });
 }
 
-joinForm.addEventListener("submit", event => {
-  event.preventDefault();
-  void session.join(name.value);
-});
-accessForm.addEventListener("submit", event => {
-  event.preventDefault();
-  void session.checkAccess(code.value);
-});
+playAgain.addEventListener("click", () => { void session.join(pickNickname()); });
 retry.addEventListener("click", () => { void session.checkAccess(); });
-leave.addEventListener("click", () => {
-  code.value = "";
-  void session.leave();
-});
+leave.addEventListener("click", () => { void session.leave(); });
 
 const resize = new ResizeObserver(queueFrame);
 resize.observe(arena);
 reduceMotion.addEventListener("change", queueFrame);
-void session.checkAccess(initialInviteCode(location));
+void session.join(pickNickname(), initialInviteCode(location));

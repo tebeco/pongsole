@@ -1,7 +1,8 @@
 # Pongsole
 
 Pongsole is multiplayer Pong in your browser or terminal. Everyone on a team controls the
-same paddle. Use a display name of 1–10 ASCII letters or digits. New players
+same paddle. Browser players receive a random nickname. Terminal players use a
+display name of 1–10 ASCII letters or digits. New players
 join the smaller team, with ties decided randomly.
 
 Team rosters flank the arena. On smaller browser screens, they appear side by
@@ -25,8 +26,8 @@ root, start the server:
 dotnet run --project src/Pongsole.Server --launch-profile http
 ```
 
-Open [http://localhost:5187](http://localhost:5187) in your browser, enter a
-display name, and join. Open another browser tab or join from an interactive
+Open [http://localhost:5187](http://localhost:5187) in your browser to join
+automatically. Open another browser tab or join from an interactive
 terminal to start a match. A third player shares one team's paddle.
 
 ```sh
@@ -35,7 +36,8 @@ dotnet run --project src/Pongsole.Client -- --server http://localhost:5187 --nam
 
 Browser and terminal players share the same arena and scores. Use **W/S** or
 **↑/↓** to move, or press and hold **Up/Down** on the browser's touch controls.
-Select **Leave** in the browser or press **Q/Esc** in the terminal to leave.
+Select **Leave game** in the browser or press **Q/Esc** in the terminal to leave.
+In the browser, **Play again** joins with another randomly selected nickname.
 Use a terminal at least **80×24**. A smaller terminal shows a resize prompt and
 pauses movement input. If you omit either terminal option, the client prompts
 for it.
@@ -56,8 +58,8 @@ aspire run --apphost src/Pongsole.AppHost/Pongsole.AppHost.csproj
 ```
 
 In the Aspire dashboard, select **Play Pongsole** under the `server` resource
-to open the browser game. Aspire uses Private mode, so enter the shared code
-shown by revealing the `game-code` parameter in the dashboard. Set
+to open the local game address. For first-time local browser access, use an
+invite link with the code from the dashboard `game-code` parameter. Set
 `PONGSOLE_SHARED_CODE` before starting Aspire to supply your own code.
 A private invite link can include the code as a fragment,
 `https://<game-host>/#code=<URL-encoded-code>`. The browser tries it once on
@@ -88,9 +90,10 @@ the link address. The public HTTPS link includes the current code and unlocks
 the browser on opening. Share it privately with the people you want to invite.
 
 The homepage is public while the tunnel runs. Joining the arena requires the
-shared code, including when you use **Play Pongsole** locally in Aspire.
+shared code. The public invite supplies it and joins the browser automatically.
 Select **Stop** on `cloudflared` to close public access while keeping the
-local game running. Restarting the tunnel creates a new URL.
+local game running. Restarting the tunnel creates a new URL. Use the latest invite after the tunnel
+or access code changes.
 
 Cloudflare Quick Tunnels are temporary development links. They require no
 account or domain, support up to 200 in-flight requests, and do not support
@@ -116,10 +119,10 @@ a hostname you control, and a shared code you choose.
    docker compose up --build -d
    ```
 
-4. Open your HTTPS origin in a browser, enter your display name and the shared
-   code, and join. A browser session can keep access across tabs and page
-   reloads while its access cookie is valid. If access expires, enter the
-   code again. Terminal players use the same HTTPS origin:
+4. Open an HTTPS invite with the code in the fragment to join under a random
+   nickname. A browser session can keep access across tabs and page reloads
+   while its access cookie is valid. If access expires, open a valid invite
+   again. Terminal players use the same HTTPS origin:
 
    ```sh
    dotnet run --project src/Pongsole.Client -- --server https://pong.example.com --name Alice

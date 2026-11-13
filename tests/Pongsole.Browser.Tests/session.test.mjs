@@ -106,7 +106,7 @@ test("reconnect checks access, preserves token and sequence, accepts lower tick 
   assert.equal(run.session.state, "playing");
 });
 
-test("expired browser grant prompts for code without losing the player", async () => {
+test("expired browser grant requests a valid link without losing the player", async () => {
   let authorized = true;
   const first = new Socket();
   const resumed = new Socket();
@@ -187,8 +187,8 @@ test("waiting and leave clear movement, and stale joins cannot recreate a depart
 test("handles denied HTTP access and rejected shared code without exposing it", async () => {
   const unavailable = fixture([], async () => { throw new AccessError(403); });
   await unavailable.session.checkAccess();
-  assert.equal(unavailable.session.state, "unavailable");
-  assert.match(unavailable.session.detail, /HTTPS/);
+  assert.equal(unavailable.session.state, "access");
+  assert.equal(unavailable.session.detail, "Open a valid invite link to join this game.");
   const rejected = fixture([], async () => { throw new AccessError(403); });
   await rejected.session.checkAccess("secret");
   assert.equal(rejected.session.state, "access");
@@ -230,4 +230,40 @@ test("Leave and a following Join wait for an old socket to stop", async () => {
   await joining;
   await time.advance(0);
   assert.deepEqual(second.calls, [["Join", "Second", null]]);
+});
+
+test("startup joins after granting invite access, Leave stays left, and Play again starts fresh", async () => {
+  const first = new Socket();
+  const second = new Socket(() => player(2, 0, "fresh"));
+  let authorized = false;
+  const run = fixture([first, second], async (_, code) => {
+    if (code === "fixture") authorized = true;
+    return { mode: "private", authorized };
+  });
+  await run.session.join("FirstName", "fixture");
+  assert.equal(run.session.state, "playing");
+  assert.deepEqual(run.accessCalls, ["fixture", undefined]);
+  assert.deepEqual(first.calls, [["Join", "FirstName", null]]);
+  await run.session.leave();
+  await run.time.advance(10_000);
+  assert.equal(run.session.state, "ready");
+  assert.equal(run.session.player, null);
+  assert.deepEqual(second.calls, []);
+  await run.session.join("NextName");
+  assert.deepEqual(second.calls, [["Join", "NextName", null]]);
+  assert.equal(run.accessCalls.filter(code => code === "fixture").length, 1);
+});
+
+test("missing and invalid invites never open a socket or schedule another access check", async () => {
+  for (const code of [undefined, "invalid"]) {
+    const run = fixture([], async () => {
+      if (code !== undefined) throw new AccessError(403);
+      return { mode: "private", authorized: false };
+    });
+    await run.session.join("Nickname", code);
+    assert.equal(run.session.state, "access");
+    assert.equal(run.session.detail, "Open a valid invite link to join this game.");
+    await run.time.advance(60_000);
+    assert.deepEqual(run.accessCalls, [code]);
+  }
 });
