@@ -18,6 +18,7 @@ builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.W
 builder.Logging.AddFilter("Microsoft.AspNetCore.Http.Connections.Internal.HttpConnectionManager", LogLevel.Information);
 builder.Services.AddSignalR().AddJsonProtocol(options => GameJson.Configure(options.PayloadSerializerOptions));
 builder.Services.AddSingleton(TimeProvider.System);
+BrowserAccess.AddServices(builder.Services);
 builder.Services.AddSingleton(_ => new GameEngine(RandomNumberGenerator.GetInt32(int.MaxValue)));
 builder.Services.AddSingleton(services => new GameCoordinator(
     services.GetRequiredService<GameEngine>(), services.GetRequiredService<TimeProvider>(), Random.Shared));
@@ -25,7 +26,12 @@ builder.Services.AddSingleton<IGameCoordinator>(services => services.GetRequired
 builder.Services.AddHostedService(services => services.GetRequiredService<GameCoordinator>());
 
 var app = builder.Build();
-new GameAccess(app.Configuration).Apply(app);
+var access = new GameAccess(app.Configuration);
+access.Apply(app);
+app.UseAuthentication();
+app.UseDefaultFiles();
+app.UseStaticFiles();
+app.Services.GetRequiredService<BrowserAccess>().MapEndpoints(app, access);
 app.MapHub<GameHub>("/game");
 app.MapDefaultEndpoints();
 app.Run();

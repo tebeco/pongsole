@@ -1,0 +1,11 @@
+{
+  "name": "pongsole",
+  "private": true,
+  "scripts": {
+    "vendor:signalr": "node scripts/vendor-signalr.mjs",
+    "check:signalr": "node scripts/vendor-signalr.mjs --check"
+  },
+  "dependencies": {
+    "@microsoft/signalr": "11.0.0"
+  }
+}
