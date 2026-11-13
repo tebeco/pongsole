@@ -34,7 +34,7 @@ public sealed class GameCoordinatorTests
 
         await Complete(coordinator, coordinator.PushAsync(resumedLease, Direction.Up, 1));
         AdvanceToSnapshot(coordinator);
-        var current = await coordinator.Subscribe("reused").ReadAsync();
+        var current = await coordinator.Subscribe("reused").ReadAsync(TestContext.Current.CancellationToken);
         Assert.Equal(1, Assert.Single(current.Players).LastProcessedSequence);
         Assert.Equal(Phase.Waiting, current.Arena.Phase);
     }
@@ -57,7 +57,7 @@ public sealed class GameCoordinatorTests
         await Task.WhenAll(pending);
         AdvanceToSnapshot(coordinator);
 
-        var snapshot = await coordinator.Subscribe("player").ReadAsync();
+        var snapshot = await coordinator.Subscribe("player").ReadAsync(TestContext.Current.CancellationToken);
         Assert.Equal(1024, Assert.Single(snapshot.Players).LastProcessedSequence);
         Assert.Equal(0, snapshot.Arena.LeftPaddle.Velocity);
         Assert.Equal(0, snapshot.Arena.RightPaddle.Velocity);
@@ -136,19 +136,19 @@ public sealed class GameCoordinatorTests
         }, () => aborted = true, time, CancellationToken.None);
 
         AdvanceToSnapshot(coordinator);
-        await sending.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await sending.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         var fastReader = coordinator.Subscribe("fast");
-        var first = await fastReader.ReadAsync();
+        var first = await fastReader.ReadAsync(TestContext.Current.CancellationToken);
         AdvanceToSnapshot(coordinator);
         AdvanceToSnapshot(coordinator);
-        var latest = await fastReader.ReadAsync();
+        var latest = await fastReader.ReadAsync(TestContext.Current.CancellationToken);
         Assert.Equal(first.Arena.Tick + 6, latest.Arena.Tick);
         Assert.False(fastReader.TryRead(out _));
         Assert.True(slowReader.TryPeek(out var buffered));
         Assert.Equal(latest.Arena.Tick, buffered.Arena.Tick);
 
         time.Advance(TimeSpan.FromSeconds(5));
-        await slowSender.WaitAsync(TimeSpan.FromSeconds(5));
+        await slowSender.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         Assert.True(aborted);
         stalled.SetResult();
     }
@@ -175,7 +175,8 @@ public sealed class GameCoordinatorTests
         var clock = new ObservedClock();
         using var coordinator = new GameCoordinator(engine, clock, new Random(2));
         await coordinator.StartAsync(CancellationToken.None);
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(5));
         await clock.TimerArmed.WaitAsync(deadline.Token);
 
         clock.Inner.Advance(TimeSpan.FromSeconds(2));

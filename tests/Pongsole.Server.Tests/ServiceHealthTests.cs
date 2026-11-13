@@ -13,7 +13,7 @@ public sealed class ServiceHealthTests
         await using var server = new WebApplicationFactory<Program>();
         using var client = server.CreateClient();
 
-        using var response = await client.GetAsync(path);
+        using var response = await client.GetAsync(path, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }

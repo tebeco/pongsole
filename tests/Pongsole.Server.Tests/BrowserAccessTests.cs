@@ -59,7 +59,7 @@ public sealed class BrowserAccessTests
         await using var app = new BrowserServer();
         using var client = app.Client(PrivateOrigin);
         using var request = Exchange(origin, marker, code);
-        using var response = await client.SendAsync(request);
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
         AssertStatus(response, status);
         Assert.False(response.Headers.Contains("Set-Cookie"));
     }
@@ -70,16 +70,16 @@ public sealed class BrowserAccessTests
         await using var app = new BrowserServer();
         using var insecure = app.Client("http://pong.example");
         using var post = Exchange("http://pong.example", "1", Code);
-        using var exchange = await insecure.SendAsync(post);
+        using var exchange = await insecure.SendAsync(post, TestContext.Current.CancellationToken);
         AssertStatus(exchange, HttpStatusCode.Forbidden);
         Assert.False(exchange.Headers.Contains("Set-Cookie"));
-        using var status = await insecure.GetAsync("/browser/session");
+        using var status = await insecure.GetAsync("/browser/session", TestContext.Current.CancellationToken);
         AssertStatus(status, HttpStatusCode.Forbidden);
         using var secure = app.Client(PrivateOrigin);
         using var query = new HttpRequestMessage(HttpMethod.Post, "/browser/session?X-Pong-Code=ignored");
         Add(query, "Origin", PrivateOrigin);
         Add(query, "X-Pong-Browser", "1");
-        using var response = await secure.SendAsync(query);
+        using var response = await secure.SendAsync(query, TestContext.Current.CancellationToken);
         AssertStatus(response, HttpStatusCode.Unauthorized);
     }
 
@@ -93,7 +93,7 @@ public sealed class BrowserAccessTests
         using var client = app.Client(PrivateOrigin);
         using var request = new HttpRequestMessage(HttpMethod.Get, "/browser/session");
         Add(request, "Origin", origin);
-        using var response = await client.SendAsync(request);
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
         AssertStatus(response, HttpStatusCode.Forbidden);
     }
 
@@ -145,12 +145,12 @@ public sealed class BrowserAccessTests
             await AssertSession(client, "loopback", true);
         else
         {
-            using var denied = await client.GetAsync("/browser/session");
+            using var denied = await client.GetAsync("/browser/session", TestContext.Current.CancellationToken);
             AssertStatus(denied, status);
         }
 
         using var post = Exchange(origin, "1", null);
-        using var response = await client.SendAsync(post);
+        using var response = await client.SendAsync(post, TestContext.Current.CancellationToken);
         AssertStatus(response, status == HttpStatusCode.OK ? HttpStatusCode.NoContent : status);
         Assert.False(response.Headers.Contains("Set-Cookie"));
         Assert.Equal(status, await Negotiate(client, origin));
@@ -204,7 +204,7 @@ public sealed class BrowserAccessTests
         else
         {
             using var request = Exchange(PrivateOrigin, "1", Code);
-            using var response = await client.SendAsync(request);
+            using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
             AssertStatus(response, HttpStatusCode.Forbidden);
             Assert.False(response.Headers.Contains("Set-Cookie"));
         }
@@ -236,7 +236,8 @@ public sealed class BrowserAccessTests
             })
             .AddJsonProtocol(options => GameJson.Configure(options.PayloadSerializerOptions))
             .Build();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
         await browser.StartAsync(timeout.Token);
         var result = await browser.InvokeAsync<JoinResult>("Join", "Browser", null, timeout.Token);
         Assert.Equal("Browser", Assert.Single(result.Snapshot.Players).DisplayName);
@@ -254,7 +255,7 @@ public sealed class BrowserAccessTests
     private static async Task<SetCookieHeaderValue> SignIn(HttpClient client, string origin)
     {
         using var request = Exchange(origin, "1", Code);
-        using var response = await client.SendAsync(request);
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
         AssertStatus(response, HttpStatusCode.NoContent);
         return SetCookieHeaderValue.Parse(Assert.Single(response.Headers.GetValues("Set-Cookie")));
     }
@@ -265,7 +266,7 @@ public sealed class BrowserAccessTests
         using var request = new HttpRequestMessage(HttpMethod.Get, "/browser/session");
         Add(request, "Cookie", cookie);
         Add(request, "Origin", origin);
-        using var response = await client.SendAsync(request);
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
         AssertStatus(response, HttpStatusCode.OK);
         var status = await response.Content.ReadFromJsonAsync<SessionStatus>();
         Assert.Equal(new SessionStatus(mode, authorized), status);
@@ -278,7 +279,7 @@ public sealed class BrowserAccessTests
         Add(request, "Origin", origin);
         Add(request, "X-Pong-Code", code);
         Add(request, "Cookie", cookie);
-        using var response = await client.SendAsync(request);
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
         return response.StatusCode;
     }
 
