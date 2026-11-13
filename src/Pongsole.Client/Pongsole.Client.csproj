@@ -6,6 +6,7 @@
     <ProjectReference Include="../Pongsole.Contracts/Pongsole.Contracts.csproj" />
     <ProjectReference Include="../Pongsole.Transport/Pongsole.Transport.csproj" />
     <InternalsVisibleTo Include="Pongsole.Client.Tests" />
+    <PackageReference Include="Spectre.Console" />
   </ItemGroup>
   <Import Project="../../NativeRtcAssets.props" />
 </Project>

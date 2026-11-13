@@ -460,7 +460,7 @@ public sealed class ClientApplicationTests
         }
     }
 
-    private sealed class TestTerminal : ITerminal, IDisposable
+    private sealed class TestTerminal : ITerminal
     {
         private readonly Queue<ConsoleKeyInfo> keys = new();
         public bool IsInteractive { get; init; } = true;
@@ -469,12 +469,18 @@ public sealed class ClientApplicationTests
         public List<IReadOnlyList<string>> Frames { get; } = [];
         public Action<IReadOnlyList<string>>? OnDraw { get; set; }
 
-        public IDisposable Begin() => this;
-        public void Dispose() => Restored = true;
+        public bool Unicode => false;
+        public bool Color => false;
+        public async Task RunScreenAsync(Func<Task> action)
+        {
+            try { await action(); }
+            finally { Restored = true; }
+        }
         public ConsoleKeyInfo? ReadKey() => keys.TryDequeue(out var key) ? key : null;
 
-        public void Draw(IReadOnlyList<string> lines)
+        public void Draw(Spectre.Console.Rendering.IRenderable frame)
         {
+            var lines = Assert.IsType<ScreenFrame>(frame).Lines;
             Frames.Add(lines);
             OnDraw?.Invoke(lines);
         }

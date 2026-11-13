@@ -1,100 +1,78 @@
+using Spectre.Console;
+
 namespace Pongsole.Client;
 
 internal interface ITerminal
 {
     bool IsInteractive { get; }
     (int Width, int Height) Size { get; }
-    IDisposable Begin();
+    bool Unicode { get; }
+    bool Color { get; }
+    Task RunScreenAsync(Func<Task> action);
     ConsoleKeyInfo? ReadKey();
-    void Draw(IReadOnlyList<string> lines);
+    void Draw(Spectre.Console.Rendering.IRenderable frame);
 }
 
 internal sealed class ConsoleTerminal : ITerminal
 {
-    private bool? cursorWasVisible;
-    private (int Width, int Height) lastSize;
-    private string[] lastFrame = [];
+    private readonly IAnsiConsole console;
+    private readonly Func<(int Width, int Height)> size;
+    private LiveDisplayContext? live;
+    private readonly bool preserveWindowsCursor;
+
+    public ConsoleTerminal() : this(CreateConsole(), () => (Console.WindowWidth, Console.WindowHeight))
+    {
+        preserveWindowsCursor = OperatingSystem.IsWindows();
+    }
+
+    internal ConsoleTerminal(IAnsiConsole console, Func<(int Width, int Height)> size)
+    {
+        this.console = console;
+        this.size = size;
+    }
+
+    private static IAnsiConsole CreateConsole() => AnsiConsole.Create(ScreenSettings(
+        Environment.GetEnvironmentVariable("PONGSOLE_DASHBOARD_TERMINAL") == "1",
+        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NO_COLOR"))));
+
+    internal static AnsiConsoleSettings ScreenSettings(bool dashboard, bool noColor) => new()
+    {
+        Ansi = dashboard ? AnsiSupport.Yes : AnsiSupport.Detect,
+        ColorSystem = noColor ? ColorSystemSupport.NoColors :
+            dashboard ? ColorSystemSupport.TrueColor : ColorSystemSupport.Detect
+    };
 
     public bool IsInteractive => !Console.IsInputRedirected && !Console.IsOutputRedirected;
-    public (int Width, int Height) Size => (Console.WindowWidth, Console.WindowHeight);
+    public (int Width, int Height) Size => size();
+    public bool Unicode => console.Profile.Capabilities.Unicode;
+    public bool Color => console.Profile.Capabilities.ColorSystem != ColorSystem.NoColors;
 
-    public IDisposable Begin()
+    public async Task RunScreenAsync(Func<Task> action)
     {
-        cursorWasVisible = OperatingSystem.IsWindows() ? Console.CursorVisible : true;
-        var session = new TerminalSession(this);
+        // Spectre restores a visible cursor on exit. Preserve a Windows cursor that began hidden.
+        var wasHidden = OperatingSystem.IsWindows() && preserveWindowsCursor && !Console.CursorVisible;
         try
         {
-            Console.CursorVisible = false;
-            Console.Clear();
-            return session;
+            await console.Live(ScreenFrame.Plain(1, 1)).AutoClear(true).Overflow(VerticalOverflow.Crop)
+                .StartAsync(async context =>
+                {
+                    live = context;
+                    try { await action(); }
+                    finally { live = null; }
+                });
         }
-        catch
+        finally
         {
-            session.Dispose();
-            throw;
+            if (wasHidden) console.Cursor.Hide();
         }
     }
 
     public ConsoleKeyInfo? ReadKey() => Console.KeyAvailable ? Console.ReadKey(intercept: true) : null;
 
-    public void Draw(IReadOnlyList<string> lines)
+    public void Draw(Spectre.Console.Rendering.IRenderable frame)
     {
-        var (width, height) = Size;
-        if (width < 2 || height < 2)
-        {
-            return;
-        }
-
-        try
-        {
-            if (lastSize != (width, height))
-            {
-                Console.Clear();
-                lastFrame = [];
-                lastSize = (width, height);
-            }
-
-            var left = OperatingSystem.IsWindows() ? Console.WindowLeft : 0;
-            var top = OperatingSystem.IsWindows() ? Console.WindowTop : 0;
-            var contentWidth = width - 1;
-            var frame = lines.Take(height - 1).ToArray();
-            for (var row = 0; row < Math.Max(frame.Length, lastFrame.Length); row++)
-            {
-                var line = row < frame.Length ? frame[row] : string.Empty;
-                if (row < lastFrame.Length && line == lastFrame[row])
-                {
-                    continue;
-                }
-
-                Console.SetCursorPosition(left, top + row);
-                Console.Write(line.AsSpan(0, Math.Min(contentWidth, line.Length)));
-                if (line.Length < contentWidth)
-                {
-                    Console.Write(new string(' ', contentWidth - line.Length));
-                }
-            }
-
-            lastFrame = frame;
-        }
-        catch (Exception error) when (error is ArgumentOutOfRangeException or IOException && Size != (width, height))
-        {
-            // The terminal shrank during this frame. Redraw on the next frame.
-            lastSize = default;
-        }
-    }
-
-    private sealed class TerminalSession(ConsoleTerminal terminal) : IDisposable
-    {
-        public void Dispose()
-        {
-            if (terminal.cursorWasVisible is not { } visible)
-            {
-                return;
-            }
-
-            terminal.cursorWasVisible = null;
-            Console.CursorVisible = visible;
-            Console.Clear();
-        }
+        var context = live ?? throw new InvalidOperationException("The terminal screen is not running.");
+        context.UpdateTarget(frame);
+        context.Refresh();
     }
 }
