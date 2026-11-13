@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Pongsole</title>
+  <link rel="stylesheet" href="/pongsole.css">
+  <script defer src="/vendor/signalr-11.0.0/signalr.min.js"></script>
+  <script type="module" src="/pongsole.mjs"></script>
+</head>
+<body>
+  <main class="cabinet">
+    <header class="masthead">
+      <h1>Pong<span>sole</span></h1>
+      <p class="connection" id="connection">Checking access</p>
+    </header>
+    <div class="layout">
+      <section class="game" aria-label="Pong arena">
+        <div class="scoreboard" aria-label="Score">
+          <div class="team left"><span>Left</span><strong id="left-score">0</strong></div>
+          <div class="match"><span id="phase">Ready</span><small id="players">0 players</small></div>
+          <div class="team right"><strong id="right-score">0</strong><span>Right</span></div>
+        </div>
+        <div class="court">
+          <canvas id="arena" role="img" aria-label="Pong court with a paddle on each side and a ball">Pong court</canvas>
+        </div>
+        <p class="team-label" id="team-label">Join to play</p>
+      </section>
+      <aside class="panel" aria-label="Game controls">
+        <form id="join-form" hidden>
+          <h2>Join game</h2>
+          <label for="display-name">Display name</label>
+          <input id="display-name" type="text" maxlength="24" autocomplete="nickname" required>
+          <button class="primary" type="submit">Join game</button>
+        </form>
+        <form id="access-form" hidden>
+          <h2>Private game</h2>
+          <label for="shared-code">Shared code</label>
+          <input id="shared-code" type="password" autocomplete="off" required>
+          <button class="primary" type="submit">Unlock game</button>
+        </form>
+        <button id="retry" type="button" hidden>Try again</button>
+        <div id="play-controls" hidden>
+          <h2>Move paddle</h2>
+          <p class="key-help"><kbd>W</kbd> <kbd>↑</kbd> Up <span aria-hidden="true">/</span> <kbd>S</kbd> <kbd>↓</kbd> Down</p>
+          <div class="directions">
+            <button type="button" class="direction" data-direction="up" aria-label="Move paddle up"><span aria-hidden="true">↑</span> Up</button>
+            <button type="button" class="direction" data-direction="down" aria-label="Move paddle down"><span aria-hidden="true">↓</span> Down</button>
+          </div>
+        </div>
+        <button id="leave" type="button" hidden>Leave game</button>
+        <p id="message" role="status" aria-live="polite"></p>
+      </aside>
+    </div>
+    <p id="announcer" class="visually-hidden" role="status" aria-live="polite"></p>
+  </main>
+</body>
+</html>
