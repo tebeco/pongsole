@@ -35,7 +35,11 @@ public sealed class GameCoordinatorTests
         await Complete(coordinator, coordinator.PushAsync(resumedLease, Direction.Up, 1));
         AdvanceToSnapshot(coordinator);
         var current = await coordinator.Subscribe("reused").ReadAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(1, Assert.Single(current.Players).LastProcessedSequence);
+        var player = Assert.Single(current.Players);
+        Assert.Equal(1, player.LastProcessedSequence);
+        Assert.Equal(0, player.RecentPushCount);
+        Assert.Null(player.LastUpTick);
+        Assert.Null(player.LastDownTick);
         Assert.Equal(Phase.Waiting, current.Arena.Phase);
     }
 
@@ -75,10 +79,19 @@ public sealed class GameCoordinatorTests
             .Select(sequence => coordinator.PushAsync("player", Direction.Up, sequence)).ToArray();
         coordinator.Tick();
         await Task.WhenAll(accepted);
+        var played = await ReadSnapshot(coordinator, "player");
+        var previous = played.Players.Single(player => player.PlayerId == joined.PlayerId);
+        Assert.Equal(10, previous.RecentPushCount);
+        Assert.NotNull(previous.LastUpTick);
+
         await Complete(coordinator, coordinator.DisconnectAsync("player"));
         coordinator.Admit("resumed");
         var resumed = await Complete(coordinator, coordinator.JoinAsync("resumed", "Ignored", joined.ResumeToken));
         Assert.Equal(10, resumed.LastProcessedSequence);
+        var restored = resumed.Snapshot.Players.Single(player => player.PlayerId == joined.PlayerId);
+        Assert.Equal(0, restored.RecentPushCount);
+        Assert.Null(restored.LastUpTick);
+        Assert.Null(restored.LastDownTick);
 
         time.Advance(TimeSpan.FromMilliseconds(999));
         await Complete(coordinator, coordinator.PushAsync("resumed", Direction.Up, 11));
@@ -86,6 +99,12 @@ public sealed class GameCoordinatorTests
         time.Advance(TimeSpan.FromMilliseconds(1));
         await Complete(coordinator, coordinator.PushAsync("resumed", Direction.Down, 12));
         Assert.True(Paddle(joined.Team).Velocity > 0);
+        var snapshot = await ReadSnapshot(coordinator, "resumed");
+        var player = snapshot.Players.Single(player => player.PlayerId == joined.PlayerId);
+        Assert.Equal(12, player.LastProcessedSequence);
+        Assert.Equal(1, player.RecentPushCount);
+        Assert.Null(player.LastUpTick);
+        Assert.NotNull(player.LastDownTick);
     }
 
     [Fact]
@@ -187,6 +206,57 @@ public sealed class GameCoordinatorTests
         await clock.ThirdTimerArmed.WaitAsync(deadline.Token);
         Assert.Equal(6, engine.State.Tick);
         await coordinator.StopAsync(deadline.Token);
+    }
+
+    [Fact]
+    public async Task ParticipationOrdersTeamByCountThenOrdinalNameAndIdAndExpiresWithoutInput()
+    {
+        using var coordinator = new GameCoordinator(engine, time, new FirstTeamRandom());
+        var joins = new List<JoinResult>();
+        foreach (var name in new[] { "z", "RightA", "A", "RightB", "a", "RightC", "A" })
+        {
+            var connection = joins.Count.ToString();
+            coordinator.Admit(connection);
+            joins.Add(await Complete(coordinator, coordinator.JoinAsync(connection, name, null)));
+        }
+
+        var initial = await ReadSnapshot(coordinator, "0");
+        var sameName = new[] { joins[2].PlayerId, joins[6].PlayerId }.Order().ToArray();
+        Assert.Equal(new[] { sameName[0], sameName[1], joins[4].PlayerId, joins[0].PlayerId },
+            initial.Players.Where(player => player.Team == Team.Left).Select(player => player.PlayerId));
+        Assert.Equal(new[] { Team.Left, Team.Left, Team.Left, Team.Left, Team.Right, Team.Right, Team.Right },
+            initial.Players.Select(player => player.Team));
+
+        var upTick = engine.State.Tick + 1;
+        await Complete(coordinator, coordinator.PushAsync("0", Direction.Up, 1));
+        time.Advance(TimeSpan.FromSeconds(1));
+        var downTick = engine.State.Tick + 1;
+        await Complete(coordinator, coordinator.PushAsync("0", Direction.Down, 2));
+        await Complete(coordinator, coordinator.PushAsync("0", Direction.Up, 2));
+        var active = await ReadSnapshot(coordinator, "0");
+        var leader = active.Players[0];
+        Assert.Equal(joins[0].PlayerId, leader.PlayerId);
+        Assert.Equal(2, leader.RecentPushCount);
+        Assert.Equal(upTick, leader.LastUpTick);
+        Assert.Equal(downTick, leader.LastDownTick);
+
+        time.Advance(TimeSpan.FromSeconds(9));
+        Assert.Equal(1, (await ReadSnapshot(coordinator, "0")).Players[0].RecentPushCount);
+        time.Advance(TimeSpan.FromSeconds(1));
+        var idle = await ReadSnapshot(coordinator, "0");
+        Assert.All(idle.Players, player => Assert.Equal(0, player.RecentPushCount));
+        Assert.Equal(joins[0].PlayerId, idle.Players[3].PlayerId);
+    }
+
+    private async Task<GameSnapshot> ReadSnapshot(GameCoordinator coordinator, string connectionId)
+    {
+        AdvanceToSnapshot(coordinator);
+        return await coordinator.Subscribe(connectionId).ReadAsync(TestContext.Current.CancellationToken);
+    }
+
+    private sealed class FirstTeamRandom : Random
+    {
+        public override int Next(int maxValue) => 0;
     }
 
     private PaddleState Paddle(Team team) => team == Team.Left ? engine.State.LeftPaddle : engine.State.RightPaddle;

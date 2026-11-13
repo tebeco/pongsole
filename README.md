@@ -1,7 +1,14 @@
 # Pongsole
 
 Pongsole is multiplayer Pong in your browser or terminal. Everyone on a team controls the
-same paddle. New players join the smaller team, with ties decided randomly.
+same paddle. Use a display name of 1–10 ASCII letters or digits. New players
+join the smaller team, with ties decided randomly.
+
+Team rosters flank the arena. On smaller browser screens, they appear side by
+side below the court. Players with more accepted pushes in the last 10 seconds
+appear first. Each accepted push briefly lights the player's Up or Down arrow.
+Pressing faster adds the same push more often, up to 10 accepted presses per
+second per player. Paddle movement still slows over time and has a speed cap.
 The game serves when both teams have a player and keeps score until the server
 stops.
 

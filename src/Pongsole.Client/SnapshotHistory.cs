@@ -6,6 +6,7 @@ internal sealed class SnapshotHistory(TimeProvider clock)
 {
     private static readonly TimeSpan SnapshotInterval = TimeSpan.FromMilliseconds(50);
     private readonly object gate = new();
+    private readonly RosterActivity activity = new(clock);
     private GameSnapshot? earlySnapshot;
     private GameSnapshot? newest;
     private ArenaState? previousArena;
@@ -36,16 +37,16 @@ internal sealed class SnapshotHistory(TimeProvider clock)
             lastProcessed = join.LastProcessedSequence;
             previousArena = null;
             newest = null;
-            AcceptJoinedSnapshot(join.Snapshot);
+            AcceptJoinedSnapshot(join.Snapshot, seedActivity: true);
             if (earlySnapshot is not null)
             {
-                AcceptJoinedSnapshot(earlySnapshot);
+                AcceptJoinedSnapshot(earlySnapshot, seedActivity: true);
                 earlySnapshot = null;
             }
         }
     }
 
-    private void AcceptJoinedSnapshot(GameSnapshot snapshot)
+    private void AcceptJoinedSnapshot(GameSnapshot snapshot, bool seedActivity = false)
     {
         if (newest is not null && snapshot.Arena.Tick < newest.Arena.Tick)
         {
@@ -58,6 +59,8 @@ internal sealed class SnapshotHistory(TimeProvider clock)
             newestTimestamp = clock.GetTimestamp();
         }
 
+        var now = clock.GetTimestamp();
+        activity.Accept(snapshot, now, seedActivity || snapshot.Arena.Phase == Phase.Waiting);
         newest = snapshot;
         foreach (var player in snapshot.Players)
         {
@@ -69,16 +72,29 @@ internal sealed class SnapshotHistory(TimeProvider clock)
         }
     }
 
-    public (ArenaState? Arena, int PlayerCount, long LastProcessed) Read()
+    public long LastProcessed
+    {
+        get
+        {
+            lock (gate)
+            {
+                return lastProcessed;
+            }
+        }
+    }
+
+    public (ArenaState? Arena, RosterPlayer[] Players, long LastProcessed) Read(bool showActivity = true)
     {
         lock (gate)
         {
             if (newest is null)
             {
-                return (null, 0, lastProcessed);
+                return (null, [], lastProcessed);
             }
 
-            return (Interpolate(newest.Arena), newest.Players.Length, lastProcessed);
+            var timestamp = clock.GetTimestamp();
+            var players = newest.Players.Select(player => activity.Read(player, timestamp, showActivity)).ToArray();
+            return (Interpolate(newest.Arena), players, lastProcessed);
         }
     }
 

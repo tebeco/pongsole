@@ -136,7 +136,7 @@ public sealed class ClientApplicationTests
             }
             else if (lines.Contains("Display name"))
             {
-                terminal.EnqueueText("Player Two");
+                terminal.EnqueueText("PlayerTwo");
                 terminal.Enqueue(ConsoleKey.Enter);
             }
             else if (lines.Contains("Connected"))
@@ -152,7 +152,7 @@ public sealed class ClientApplicationTests
             return game;
         }, new ClientOptions(null, null), "env-code");
 
-        Assert.Equal("Player Two", Assert.Single(game.Names));
+        Assert.Equal("PlayerTwo", Assert.Single(game.Names));
         Assert.DoesNotContain(terminal.Frames.SelectMany(frame => frame), line => line.Contains("Shared code"));
     }
 
@@ -388,7 +388,7 @@ public sealed class ClientApplicationTests
         var connection = new TestConnection();
         terminal.OnDraw = lines =>
         {
-            if (lines.Any(line => line.StartsWith("Enter a display name")))
+            if (lines.Any(line => line == PlayerName.ValidationMessage))
             {
                 terminal.EnqueueText("Corrected");
                 terminal.Enqueue(ConsoleKey.Enter);

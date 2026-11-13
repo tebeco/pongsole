@@ -64,7 +64,7 @@ test("reconciles early and same-tick snapshots and uses the next processed seque
     return player(8, 2);
   });
   const { session } = fixture([socket]);
-  await session.join(" Alice ");
+  await session.join("Alice");
   await session.send("up");
   socket.snapshot(snapshot(8, 99));
   socket.snapshot(snapshot(9, 10));

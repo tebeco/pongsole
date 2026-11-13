@@ -22,6 +22,24 @@ public sealed class GameEngineTests
     }
 
     [Fact]
+    public void MoreFrequentSameDirectionPushesBuildSpeedBeforeSaturation()
+    {
+        var engine = new GameEngine(42, CreateState());
+
+        for (var tick = 0; tick < 60; tick++)
+        {
+            var faster = tick % 6 == 5 ? 1 : 0;
+            var slower = tick % 20 == 19 ? 1 : 0;
+            engine.Advance(faster, slower, true, true);
+        }
+
+        var state = engine.State;
+        Assert.True(state.RightPaddle.Velocity > 0);
+        Assert.True(state.LeftPaddle.Velocity > state.RightPaddle.Velocity);
+        Assert.True(state.LeftPaddle.Velocity < 20);
+    }
+
+    [Fact]
     public void HalvesUnconstrainedVelocityAfterTwentyOneTicks()
     {
         var engine = new GameEngine(42, CreateState() with { LeftPaddle = new PaddleState(15, 10) });
