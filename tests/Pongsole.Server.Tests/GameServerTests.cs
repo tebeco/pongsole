@@ -37,16 +37,16 @@ public sealed class GameServerTests
         using var secondSubscription = second.On<GameSnapshot>("Snapshot", secondUpdates.Enqueue);
         using var thirdSubscription = third.On<GameSnapshot>("Snapshot", observed.Enqueue);
 
-        await first.StartAsync().WaitAsync(Deadline);
+        await first.StartAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
         var alice = await Join(first, " Alice ");
         await Push(first, Direction.Down, 1);
         Assert.Equal(Phase.Waiting, alice.Snapshot.Arena.Phase);
-        await second.StartAsync().WaitAsync(Deadline);
+        await second.StartAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
         var bob = await Join(second, "Bob");
         Assert.NotEqual(alice.Team, bob.Team);
         Assert.Equal("Alice", bob.Snapshot.Players.Single(player => player.PlayerId == alice.PlayerId).DisplayName);
 
-        await third.StartAsync().WaitAsync(Deadline);
+        await third.StartAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
         var carol = await Join(third, "Carol");
         var teammate = alice.Team == carol.Team ? first : second;
         var teammateId = alice.Team == carol.Team ? alice.PlayerId : bob.PlayerId;
@@ -71,8 +71,8 @@ public sealed class GameServerTests
         await SnapshotWith(secondUpdates, snapshot =>
             snapshot.Arena.LeftScore == goal.Arena.LeftScore && snapshot.Arena.RightScore == goal.Arena.RightScore);
 
-        await third.StopAsync().WaitAsync(Deadline);
-        await second.StopAsync().WaitAsync(Deadline);
+        await third.StopAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
+        await second.StopAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
         await SnapshotWith(firstUpdates, snapshot => snapshot.Players.Length == 1 && snapshot.Arena.Phase == Phase.Waiting);
     }
 
@@ -86,9 +86,9 @@ public sealed class GameServerTests
         await using var probe = server.Connect();
         var observed = new ConcurrentQueue<GameSnapshot>();
         using var subscription = second.On<GameSnapshot>("Snapshot", observed.Enqueue);
-        await first.StartAsync().WaitAsync(Deadline);
-        await second.StartAsync().WaitAsync(Deadline);
-        await probe.StartAsync().WaitAsync(Deadline);
+        await first.StartAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
+        await second.StartAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
+        await probe.StartAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
 
         await Marker("INVALID_NAME", () => Join(first, "A\t"));
         await Marker("INVALID_RESUME_TOKEN", () => Join(first, "Alice", "unknown"));
@@ -97,7 +97,7 @@ public sealed class GameServerTests
         await Marker("SESSION_ALREADY_CONNECTED", () => Join(probe, "Other", alice.ResumeToken));
         await Marker("NOT_JOINED", () => Push(probe, Direction.Up, 1));
         await Marker("INVALID_SEQUENCE", () => Push(first, Direction.Up, 0));
-        await Assert.ThrowsAsync<HubException>(() => first.InvokeAsync("Push", 0, 1L).WaitAsync(Deadline));
+        await Assert.ThrowsAsync<HubException>(() => first.InvokeAsync("Push", 0, 1L, TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken));
 
         await Join(second, "Bob");
         await SnapshotWith(observed, snapshot => snapshot.Arena.Phase != Phase.Waiting);
@@ -111,7 +111,7 @@ public sealed class GameServerTests
         Assert.True(Paddle(ignored, alice.Team).Velocity < 0);
         Assert.True(Paddle(ignored, alice.Team).Y <= Paddle(accepted, alice.Team).Y);
 
-        await first.StopAsync().WaitAsync(Deadline);
+        await first.StopAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
         await SnapshotWith(observed, snapshot => snapshot.Players.All(player => player.PlayerId != alice.PlayerId));
         server.Time.Advance(TimeSpan.FromMilliseconds(59_999));
         var resumed = await Join(probe, "Ignored", alice.ResumeToken);
@@ -120,11 +120,11 @@ public sealed class GameServerTests
         Assert.Equal(11, resumed.LastProcessedSequence);
         Assert.Equal("Alice", resumed.Snapshot.Players.Single(player => player.PlayerId == alice.PlayerId).DisplayName);
 
-        await probe.StopAsync().WaitAsync(Deadline);
+        await probe.StopAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
         await SnapshotWith(observed, snapshot => snapshot.Arena.Tick > resumed.Snapshot.Arena.Tick &&
             snapshot.Players.All(player => player.PlayerId != alice.PlayerId));
         server.Time.Advance(TimeSpan.FromSeconds(60));
-        await first.StartAsync().WaitAsync(Deadline);
+        await first.StartAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
         await Marker("EXPIRED_RESUME_TOKEN", () => Join(first, "Alice", alice.ResumeToken));
         Assert.NotEqual(alice.PlayerId, (await Join(first, "Alice")).PlayerId);
     }
@@ -144,8 +144,8 @@ public sealed class GameServerTests
             closed.TrySetResult(exception);
             return Task.CompletedTask;
         };
-        await client.StartAsync().WaitAsync(Deadline);
-        var error = await closed.Task.WaitAsync(Deadline);
+        await client.StartAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
+        var error = await closed.Task.WaitAsync(Deadline, TestContext.Current.CancellationToken);
         Assert.Contains("PONGSOLE_CAPACITY_REACHED", error?.Message);
     }
 
@@ -156,10 +156,10 @@ public sealed class GameServerTests
         await using var server = new TestGameServer(IPAddress.Parse("192.0.2.4"), "Private", logs: logs);
         server.StartTicks();
         await using var client = server.Connect(https: true, code: "test-code");
-        await client.StartAsync().WaitAsync(Deadline);
+        await client.StartAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
         var player = await Join(client, "Player");
-        await client.StopAsync().WaitAsync(Deadline);
-        await client.StartAsync().WaitAsync(Deadline);
+        await client.StopAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
+        await client.StartAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
         var restored = await Join(client, "Player", player.ResumeToken);
         Assert.Equal(player.PlayerId, restored.PlayerId);
 
@@ -195,15 +195,15 @@ public sealed class GameServerTests
             request.Headers.Add("X-Forwarded-Proto", "https");
         }
 
-        using var response = await client.SendAsync(request);
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(expected, response.StatusCode);
     }
 
     private static Task<JoinResult> Join(HubConnection client, string name, string? token = null) =>
-        client.InvokeAsync<JoinResult>("Join", name, token).WaitAsync(Deadline);
+        client.InvokeAsync<JoinResult>("Join", name, token).WaitAsync(Deadline, TestContext.Current.CancellationToken);
 
     private static Task Push(HubConnection client, Direction direction, long sequence) =>
-        client.InvokeAsync("Push", direction, sequence).WaitAsync(Deadline);
+        client.InvokeAsync("Push", direction, sequence).WaitAsync(Deadline, TestContext.Current.CancellationToken);
 
     private static async Task Marker(string marker, Func<Task> operation)
     {
@@ -219,7 +219,8 @@ public sealed class GameServerTests
 
     private static async Task<GameSnapshot> SnapshotWith(ConcurrentQueue<GameSnapshot> snapshots, Func<GameSnapshot, bool> predicate)
     {
-        using var timeout = new CancellationTokenSource(Deadline);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(Deadline);
         while (true)
         {
             if (snapshots.FirstOrDefault(predicate) is { } snapshot)
