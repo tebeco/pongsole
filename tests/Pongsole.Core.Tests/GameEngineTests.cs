@@ -5,10 +5,10 @@ namespace Pongsole.Core.Tests;
 public sealed class GameEngineTests
 {
     [Theory]
-    [InlineData(1, -1, 2.4, -2.4)]
-    [InlineData(3, -4, 7.2, -9.6)]
+    [InlineData(1, -1, 7.2, -7.2)]
+    [InlineData(3, -4, 21.6, -28.8)]
     [InlineData(1 - 1, 2 - 2, 0, 0)]
-    [InlineData(int.MaxValue, int.MinValue, 24, -24)]
+    [InlineData(int.MaxValue, int.MinValue, 72, -72)]
     public void AppliesNetPushesBeforeIntegrationAndDecay(int left, int right, double leftSpeed, double rightSpeed)
     {
         var engine = new GameEngine(42, CreateState());
@@ -22,11 +22,35 @@ public sealed class GameEngineTests
     }
 
     [Fact]
+    public void TriplesDisplacementAndVelocityBeforeReachingTheWall()
+    {
+        const double oldImpulse = 2.4;
+        const double oldCap = 24;
+        var engine = new GameEngine(42, CreateState());
+        var oldVelocity = 0.0;
+        var oldDisplacement = 0.0;
+        var decay = Math.Pow(2, -1.0 / 21);
+        for (var tick = 0; tick < 12; tick++)
+        {
+            var push = tick % 6 == 0 ? 1 : 0;
+            oldVelocity = Math.Min(oldVelocity + oldImpulse * push, oldCap);
+            oldDisplacement += oldVelocity / 60;
+            oldVelocity *= decay;
+            engine.Advance(push, -push, true, true);
+        }
+
+        Assert.Equal(15 + 3 * oldDisplacement, engine.State.LeftPaddle.Y, 12);
+        Assert.Equal(15 - 3 * oldDisplacement, engine.State.RightPaddle.Y, 12);
+        Assert.Equal(3 * oldVelocity, engine.State.LeftPaddle.Velocity, 12);
+        Assert.Equal(-3 * oldVelocity, engine.State.RightPaddle.Velocity, 12);
+    }
+
+    [Fact]
     public void MoreFrequentSameDirectionPushesBuildSpeedBeforeSaturation()
     {
         var engine = new GameEngine(42, CreateState());
 
-        for (var tick = 0; tick < 60; tick++)
+        for (var tick = 0; tick < 30; tick++)
         {
             var faster = tick % 6 == 5 ? 1 : 0;
             var slower = tick % 20 == 19 ? 1 : 0;
@@ -36,7 +60,7 @@ public sealed class GameEngineTests
         var state = engine.State;
         Assert.True(state.RightPaddle.Velocity > 0);
         Assert.True(state.LeftPaddle.Velocity > state.RightPaddle.Velocity);
-        Assert.True(state.LeftPaddle.Velocity < 24);
+        Assert.True(state.LeftPaddle.Velocity < 72);
     }
 
     [Fact]

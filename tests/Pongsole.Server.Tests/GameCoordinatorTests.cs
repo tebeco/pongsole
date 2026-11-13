@@ -130,6 +130,9 @@ public sealed class GameCoordinatorTests
             time.Advance(TimeSpan.FromMilliseconds(16));
             coordinator.Tick();
         }
+        var beforeDiscrete = await ReadSnapshot(coordinator, "third");
+        var centered = three.Team == Team.Left ? beforeDiscrete.Arena.LeftPaddle : beforeDiscrete.Arena.RightPaddle;
+        Assert.Equal(new PaddleState(15, 0), centered);
         var discrete = Enumerable.Range(2, 10)
             .Select(sequence => coordinator.PushAsync(third, Direction.Down, sequence)).ToArray();
         coordinator.Tick();
@@ -139,7 +142,7 @@ public sealed class GameCoordinatorTests
         Assert.Equal(9, observed.Players.Single(player => player.PlayerId == teammateId).RecentPushCount);
         Assert.Equal(10, observed.Players.Single(player => player.PlayerId == three.PlayerId).RecentPushCount);
         Assert.Equal(11, observed.Players.Single(player => player.PlayerId == three.PlayerId).LastProcessedSequence);
-        Assert.InRange(paddle.Y, 15, 15.1);
+        Assert.InRange(paddle.Y, 15.12, 15.36);
     }
 
 
