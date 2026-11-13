@@ -24,8 +24,10 @@ The server decides paddle bounces and goals.
 
 ## Play locally
 
-Install .NET SDK **11.0.100**, as pinned in `global.json`. From the repository
-root, start the server:
+Install .NET SDK **11.0.100**, as pinned in `global.json`. Create a
+[Cloudflare TURN key](#cloudflare-turn-configuration) and set `Pong__Turn__KeyId`
+and `Pong__Turn__ApiToken` in the server environment before starting. Local
+matches also need TURN. From the repository root, start the server:
 
 ```sh
 dotnet run --project src/Pongsole.Server --launch-profile http
@@ -59,7 +61,8 @@ machine without a code. Stop the server with **Ctrl+C**.
 
 ## Run with Aspire
 
-With the Aspire CLI installed, run this from the repository root:
+With the Aspire CLI installed, add the [Cloudflare TURN settings](#cloudflare-turn-configuration)
+to the AppHost user secrets, then run this from the repository root:
 
 ```sh
 aspire run --apphost src/Pongsole.AppHost/Pongsole.AppHost.csproj
@@ -108,7 +111,8 @@ Discord controls how the preview appears and may cache it.
 
 Cloudflare Quick Tunnels are temporary development links. They require no
 account or domain, support up to 200 in-flight requests, and do not support
-Server-Sent Events. Pongsole's browser client uses WebSockets.
+Server-Sent Events. The tunnel serves the game page and HTTPS signaling.
+Gameplay uses WebRTC over UDP through Cloudflare TURN.
 
 ### Cloudflare TURN configuration
 
@@ -135,11 +139,13 @@ See [native build and platform details](native/libdatachannel/README.md).
 
 The Docker Compose example runs the server on an internal port and publishes
 only Caddy on ports 80 and 443. It requires Docker Compose with Linux containers,
-a hostname you control, and a shared code you choose.
+a hostname you control, a shared code you choose, and a Cloudflare TURN key.
 
 1. Copy `.env.example` to `.env`. Set `DOMAIN` to the hostname and fill
-   `PONGSOLE_SHARED_CODE` with a strong code. Share the code privately with
-   players and keep `.env` out of Git.
+   `PONGSOLE_SHARED_CODE` with a strong code. Set `CLOUDFLARE_TURN_KEY_ID` and
+   `CLOUDFLARE_TURN_API_TOKEN` from your Cloudflare TURN key. Compose passes
+   both settings only to the server. Share the game code privately with players
+   and keep `.env` out of Git.
 2. For automatic public TLS, point the hostname's DNS records at the host and
    make TCP ports 80 and 443 reachable. For a LAN hostname, configure Caddy with
    a certificate trusted by every client, or add `tls internal` to the site
@@ -169,11 +175,13 @@ certificate data. Scores and session state are held in memory and reset when the
 server stops.
 
 For a different reverse proxy, set `Pong__Mode=Private`, provide
-`PONGSOLE_SHARED_CODE`, and configure `Pong__KnownProxies__0` with the immediate
-proxy's IP address. The proxy must support WebSockets and forward the original
-HTTPS scheme. The example trusts only Caddy at `172.30.52.2`. Use an unused
+`PONGSOLE_SHARED_CODE`, `Pong__Turn__KeyId`, and `Pong__Turn__ApiToken`, and
+configure `Pong__KnownProxies__0` with the immediate proxy's IP address. The
+proxy serves the page and HTTPS signaling and must forward the original HTTPS
+scheme. The example trusts only Caddy at `172.30.52.2`. Use an unused
 subnet and update the Compose network and trusted IP together if needed. Clients
-validate the server certificate. The browser page and its WebSocket connection use the same HTTPS origin.
+validate the server certificate. The browser page and signaling use the same
+HTTPS origin. Gameplay traffic goes through the TURN relay over UDP.
 
 ## Build and test
 

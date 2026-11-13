@@ -5,6 +5,8 @@ services:
       Pong__Mode: Private
       ASPNETCORE_URLS: http://0.0.0.0:8080
       PONGSOLE_SHARED_CODE: ${PONGSOLE_SHARED_CODE:?Set PONGSOLE_SHARED_CODE}
+      Pong__Turn__KeyId: ${CLOUDFLARE_TURN_KEY_ID:?Set CLOUDFLARE_TURN_KEY_ID}
+      Pong__Turn__ApiToken: ${CLOUDFLARE_TURN_API_TOKEN:?Set CLOUDFLARE_TURN_API_TOKEN}
       Pong__KnownProxies__0: 172.30.52.2
     networks:
       pongsole:
