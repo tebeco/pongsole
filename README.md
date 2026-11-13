@@ -107,6 +107,20 @@ Cloudflare Quick Tunnels are temporary development links. They require no
 account or domain, support up to 200 in-flight requests, and do not support
 Server-Sent Events. Pongsole's browser client uses WebSockets.
 
+### Cloudflare TURN configuration
+
+Create a TURN key in **Realtime → TURN** in the Cloudflare dashboard. For the
+Aspire AppHost, use **Manage User Secrets** in Visual Studio and set
+`Parameters:cloudflare-turn-key-id` and `Parameters:cloudflare-turn-api-token`.
+The AppHost uses the User Secrets ID `Pongsole.AppHost.CloudflareTurn` and
+passes the settings only to the game server. Keep the API token out of invite
+links, chat, and the repository. A standalone server can use
+`Pong__Turn__KeyId` and `Pong__Turn__ApiToken`.
+
+The credential provider is optional and does not change the current game
+transport by itself. Cloudflare bills standalone TURN relay traffic at
+$0.05 per outbound GB. See [Cloudflare Realtime TURN](https://developers.cloudflare.com/realtime/turn/).
+
 ## Host a private game over HTTPS
 
 The Docker Compose example runs the server on an internal port and publishes

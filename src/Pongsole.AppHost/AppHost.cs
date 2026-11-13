@@ -26,6 +26,16 @@ if (builder.ExecutionContext.IsRunMode)
         .WithEnvironment("Pong__KnownProxies__0", "127.0.0.1")
         .WithEnvironment("Pong__KnownProxies__1", "::1");
 
+    foreach (var (name, key) in new[]
+    {
+        ("cloudflare-turn-key-id", "Pong__Turn__KeyId"),
+        ("cloudflare-turn-api-token", "Pong__Turn__ApiToken")
+    })
+    {
+        if (!string.IsNullOrWhiteSpace(builder.Configuration[$"Parameters:{name}"]))
+            server.WithEnvironment(key, builder.AddParameter(name, secret: true));
+    }
+
     var tunnel = builder.AddProject<Projects.Pongsole_Tunnel>("cloudflared")
         .WithHttpEndpoint(name: "http")
         .WithUrlForEndpoint("http", url =>

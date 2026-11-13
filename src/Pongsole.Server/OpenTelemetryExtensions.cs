@@ -24,7 +24,8 @@ internal static class OpenTelemetryExtensions
                     context.Request.Path != "/health" && context.Request.Path != "/alive"
                     // SignalR transport URLs can carry connection tokens.
                     && !context.Request.Path.StartsWithSegments("/game"))
-                .AddHttpClientInstrumentation());
+                .AddHttpClientInstrumentation(options => options.FilterHttpRequestMessage =
+                    request => request.RequestUri?.Host != CloudflareTurnCredentialProvider.ApiHost));
 
         if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
         {

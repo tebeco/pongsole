@@ -19,6 +19,10 @@ builder.Logging.AddFilter("Microsoft.AspNetCore.Http.Connections.Internal.HttpCo
 builder.Services.AddSignalR().AddJsonProtocol(options => GameJson.Configure(options.PayloadSerializerOptions));
 builder.Services.AddSingleton(TimeProvider.System);
 BrowserAccess.AddServices(builder.Services);
+builder.Services.AddSingleton(builder.Configuration.GetSection("Pong:Turn").Get<TurnOptions>() ?? new());
+builder.Services.AddHttpClient<ITurnCredentialProvider, CloudflareTurnCredentialProvider>()
+    .RemoveAllLoggers()
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
 builder.Services.AddSingleton(_ => new GameEngine(RandomNumberGenerator.GetInt32(int.MaxValue)));
 builder.Services.AddSingleton(services => new GameCoordinator(
     services.GetRequiredService<GameEngine>(), services.GetRequiredService<TimeProvider>(), Random.Shared));
