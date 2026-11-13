@@ -111,6 +111,14 @@ canvas { display: block; width: 100%; aspect-ratio: 100 / 30; }
 .game-controls form h2, .game-controls form label, #name-rule { grid-column: 1 / -1; }
 #name-rule { grid-row: 4; }
 .game-controls form button { grid-column: 2; grid-row: 3; }
+#access-form {
+  flex: 0 1 auto;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(0, 16rem) max-content;
+}
+#access-form button { justify-self: start; }
 label, #message { font-size: .9rem; }
 #message { color: var(--muted); flex-basis: 100%; }
 #message:empty { display: none; }
@@ -138,6 +146,10 @@ kbd { color: #fff; }
 }
 @media (pointer: coarse), (max-width: 760px) {
   .directions { display: grid; }
+}
+@media (max-width: 480px) {
+  #access-form { width: min(100%, 16rem); grid-template-columns: minmax(0, 1fr); }
+  #access-form button { grid-column: 1; grid-row: 4; }
 }
 @media (max-width: 360px) {
   .team { flex-direction: column; gap: .2rem; }
