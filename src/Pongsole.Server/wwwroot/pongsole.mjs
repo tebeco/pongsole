@@ -57,6 +57,7 @@ bindControls(movement, controls, window, document);
 
 function show() {
   const { state, detail, history, player } = session;
+  movement.setConnected(state === "playing");
   connection.textContent = labels[state];
   connection.dataset.state = state;
   message.textContent = detail;

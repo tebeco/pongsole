@@ -26,13 +26,32 @@ jobs:
         with:
           node-version: '26'
           package-manager-cache: false
-      - run: npm ci --ignore-scripts
-      - run: node scripts/vendor-signalr.mjs --check
       - run: node scripts/check-native-rtc.mjs
+      - name: Build macOS native WebRTC library
+        if: runner.os == 'macOS'
+        shell: pwsh
+        run: |
+          if (-not (brew list --versions openssl@3)) {
+            brew install openssl@3
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
+          brew list --versions openssl@3
+          $target = if ((uname -m) -eq 'arm64') { 'osx-arm64' } else { 'osx-x64' }
+          ./scripts/build-native-rtc.ps1 -Target $target
       - run: node --test "tests/Pongsole.Browser.Tests/*.test.mjs"
       - run: dotnet restore Pongsole.slnx
       - run: dotnet build Pongsole.slnx --configuration Release --no-restore
       - run: dotnet test Pongsole.slnx --configuration Release --no-build --logger trx --results-directory TestResults
+      - name: Load native WebRTC from published output
+        shell: pwsh
+        run: |
+          $output = Join-Path $PWD 'artifacts/native-smoke-publish'
+          dotnet publish src/Pongsole.Server -c Release --no-build -o $output
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          dotnet build tests/Pongsole.NativeSmoke -c Release
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Copy-Item tests/Pongsole.NativeSmoke/bin/Release/net11.0/Pongsole.NativeSmoke.* -Destination $output
+          dotnet (Join-Path $output 'Pongsole.NativeSmoke.dll') $output
       - uses: actions/upload-artifact@v7
         if: failure()
         with:

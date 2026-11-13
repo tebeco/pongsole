@@ -1,7 +1,10 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Net;
+using System.Net.Http.Json;
 using System.Net.WebSockets;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -16,11 +19,190 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using Pongsole.Contracts;
 using Pongsole.Core;
+using Pongsole.Transport;
 
 namespace Pongsole.Server.Tests;
 
 public sealed class GameServerTests
 {
+    [Fact]
+    public async Task RelaySignalingAuthenticatesBeforeMintingAndRequiresSessionToken()
+    {
+        var credentials = new TestTurnCredentials();
+        var peer = new TestRtcPeer();
+        await using var server = new TestGameServer(IPAddress.Parse("192.0.2.4"), "Private",
+            relayFactory: peer, relayCredentials: credentials);
+        server.StartTicks();
+        using var client = server.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = TestGameServer.Origin(true) });
+        using var unauthorized = await client.PostAsync("/rtc/sessions", null, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
+        Assert.Equal(0, credentials.Calls);
+
+        client.DefaultRequestHeaders.Add("X-Pong-Code", "test-code");
+        using var started = await client.PostAsync("/rtc/sessions", null, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, started.StatusCode);
+        Assert.True(started.Headers.CacheControl?.NoStore);
+        var session = await started.Content.ReadFromJsonAsync<RtcSession>(TestContext.Current.CancellationToken);
+        Assert.NotNull(session);
+        Assert.Equal(2, credentials.Calls);
+        Assert.Equal("user-1", Assert.Single(session.IceServers).Username);
+        Assert.Equal("user-2", Assert.Single(peer.IceServers).Username);
+
+        var offerPath = $"/rtc/sessions/{session.SessionId}/offer";
+        using var missingToken = await client.PostAsJsonAsync(offerPath, new RtcDescription(TestRtcPeer.Sdp),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, missingToken.StatusCode);
+        client.DefaultRequestHeaders.Add("X-Pong-Session", session.SessionToken);
+        using var rejected = await client.PostAsJsonAsync(offerPath,
+            new RtcDescription(TestRtcPeer.Sdp.Replace("typ relay", "typ host")), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        using var answered = await client.PostAsJsonAsync(offerPath, new RtcDescription(TestRtcPeer.Sdp),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, answered.StatusCode);
+        using var duplicate = await client.PostAsJsonAsync(offerPath, new RtcDescription(TestRtcPeer.Sdp),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+        Assert.Equal(1, peer.Offers);
+        using var deleted = await client.DeleteAsync($"/rtc/sessions/{session.SessionId}", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+        await peer.Disposed.Task.WaitAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task RelayRejectsCrossOriginMissingBrowserMarkerAndBrowserCodeWithoutTicket()
+    {
+        var credentials = new TestTurnCredentials();
+        await using var server = new TestGameServer(IPAddress.Parse("192.0.2.4"), "Private",
+            relayFactory: new TestRtcPeer(), relayCredentials: credentials);
+        using var client = server.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = TestGameServer.Origin(true) });
+        client.DefaultRequestHeaders.Add("X-Pong-Code", "test-code");
+        client.DefaultRequestHeaders.Add("Origin", "https://unrelated.example");
+        using var crossOrigin = await client.PostAsync("/rtc/sessions", null, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Forbidden, crossOrigin.StatusCode);
+
+        client.DefaultRequestHeaders.Remove("Origin");
+        client.DefaultRequestHeaders.Add("Origin", "https://localhost");
+        using var unmarked = await client.PostAsync("/rtc/sessions", null, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Forbidden, unmarked.StatusCode);
+        client.DefaultRequestHeaders.Add("X-Pong-Browser", "1");
+        using var noTicket = await client.PostAsync("/rtc/sessions", null, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, noTicket.StatusCode);
+        Assert.Equal(0, credentials.Calls);
+
+        using var unlock = await client.PostAsync("/browser/session", null, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, unlock.StatusCode);
+        client.DefaultRequestHeaders.Remove("X-Pong-Code");
+        using var ticketed = await client.PostAsync("/rtc/sessions", null, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, ticketed.StatusCode);
+        Assert.Equal(2, credentials.Calls);
+    }
+
+    [Fact]
+    public async Task RelayReservationsLimitStartsPerAddressAndReleaseExpiredAdmissions()
+    {
+        using var coordinator = new GameCoordinator(new GameEngine(1), new FakeTimeProvider(), new Random(1));
+        var time = new FakeTimeProvider();
+        var sessions = new RtcSessions(coordinator, time);
+        var reservations = new List<RtcConnection>();
+        for (var index = 0; index < 64; index++)
+        {
+            var (connection, error) = sessions.Reserve(new IPAddress([192, 0, 2, (byte)(index / 5)]));
+            Assert.Null(error);
+            Assert.NotNull(connection);
+            reservations.Add(connection);
+            if (index == 4)
+                Assert.Equal("PONGSOLE_RTC_RATE_LIMIT", sessions.Reserve(IPAddress.Parse("192.0.2.0")).Error);
+        }
+
+        Assert.Equal("PONGSOLE_CAPACITY_REACHED", sessions.Reserve(IPAddress.Loopback).Error);
+        Assert.Null(sessions.Find(reservations[0].Id, new string('0', 64)));
+        Assert.Same(reservations[0], sessions.Find(reservations[0].Id, reservations[0].SessionToken));
+        time.Advance(TimeSpan.FromSeconds(30));
+        while (reservations.Any(connection => !connection.Completion.IsCompleted))
+        {
+            coordinator.Tick();
+            await Task.Delay(1, TestContext.Current.CancellationToken);
+        }
+
+        Assert.Null(sessions.Find(reservations[0].Id, reservations[0].SessionToken));
+        Assert.Equal("PONGSOLE_RTC_RATE_LIMIT", sessions.Reserve(IPAddress.Parse("192.0.2.0")).Error);
+        time.Advance(TimeSpan.FromSeconds(30));
+        var (replacement, _) = sessions.Reserve(IPAddress.Parse("192.0.2.0"));
+        Assert.NotNull(replacement);
+        Assert.InRange(replacement.Epoch, 1, RealtimePacket.MaxSafeInteger);
+        Assert.DoesNotContain(reservations, reservation => reservation.Epoch == replacement.Epoch);
+        replacement.Close();
+        while (!replacement.Completion.IsCompleted)
+        {
+            coordinator.Tick();
+            await Task.Delay(1, TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task RelayBackpressureKeepsOnlyTheLatestSnapshotAndControlOverflowClosesPeer()
+    {
+        var time = new FakeTimeProvider();
+        var engine = new GameEngine(1);
+        using var coordinator = new GameCoordinator(engine, time, new Random(1));
+        var sessions = new RtcSessions(coordinator, time);
+        var (connection, _) = sessions.Reserve(IPAddress.Loopback);
+        Assert.NotNull(connection);
+        var peer = new TestRtcPeer();
+        Assert.True(connection.Attach(peer));
+        Assert.True(connection.TryBeginOffer(out _));
+        var control = new TestRtcChannel("control");
+        var realtime = new TestRtcChannel("realtime") { BufferedAmount = 1, BufferOnSend = true };
+        peer.Open(control);
+        peer.Open(realtime);
+        control.Receive("""{"type":"join","name":"Player"}"""u8.ToArray());
+        coordinator.Tick();
+        await control.Sent.Reader.ReadAsync(TestContext.Current.CancellationToken);
+
+        var arena = engine.State with
+        {
+            Phase = Phase.Playing,
+            Tick = 11,
+            Balls = [.. Enumerable.Range(1, 10).Select(id => new BallState(id, 50, 15, 24, 0))],
+            Pickups = [.. Enumerable.Range(1, 12).Select(id => new PickupState(id, 50, 15, 10, 3600))]
+        };
+        var players = Enumerable.Range(1, 64).Select(index =>
+            new PlayerState(Guid.NewGuid(), $"Player{index:0000}", (Team)(index % 2), index)).ToImmutableArray();
+        connection.PublishSnapshot(new GameSnapshot(arena, players));
+        connection.PublishSnapshot(new GameSnapshot(arena with { Tick = 12 }, players));
+
+        Assert.False(realtime.Sent.Reader.TryRead(out _));
+        realtime.Drain();
+        var first = await realtime.Sent.Reader.ReadAsync(TestContext.Current.CancellationToken);
+        Assert.True(RealtimePacket.TryRead(first, out var header));
+        Assert.True(header.ChunkCount > 1);
+        var reassembly = new SnapshotReassembly(connection.Epoch, time);
+        Assert.Null(reassembly.Accept(first));
+        byte[]? payload = null;
+        for (var index = 1; index < header.ChunkCount; index++)
+        {
+            Assert.True(realtime.Sent.Reader.TryRead(out var chunk));
+            payload = reassembly.Accept(chunk);
+        }
+        Assert.NotNull(payload);
+        Assert.True(SnapshotCodec.TryRead(payload, out var snapshot));
+        Assert.NotNull(snapshot);
+        Assert.Equal(12, snapshot.Arena.Tick);
+        Assert.Equal(64, snapshot.Players.Length);
+        Assert.Equal(10, snapshot.Arena.Balls.Length);
+        Assert.Equal(12, snapshot.Arena.Pickups.Length);
+        Assert.False(realtime.Sent.Reader.TryRead(out _));
+
+        control.BufferedAmount = 16 * 1024;
+        control.Receive("""{"type":"join","name":"Player"}"""u8.ToArray());
+        await peer.Disposed.Task.WaitAsync(TestContext.Current.CancellationToken);
+        while (!connection.Completion.IsCompleted)
+        {
+            coordinator.Tick();
+            await Task.Delay(1, TestContext.Current.CancellationToken);
+        }
+    }
+
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(10);
 
     [Fact]
@@ -326,7 +508,8 @@ public sealed class GameServerTests
 
 
     private sealed class TestGameServer(IPAddress peer, string mode = "Loopback", bool knownProxy = false,
-        CapturedLogs? logs = null, bool useWallClock = false)
+        CapturedLogs? logs = null, bool useWallClock = false, IRtcPeerFactory? relayFactory = null,
+        ITurnCredentialProvider? relayCredentials = null)
         : WebApplicationFactory<Program>
     {
         internal FakeTimeProvider Time { get; } = new();
@@ -393,6 +576,20 @@ public sealed class GameServerTests
                 services.RemoveAll<TimeProvider>();
                 services.AddSingleton<TimeProvider>(useWallClock ? TimeProvider.System : Time);
                 services.AddSingleton<IStartupFilter>(new SetPeer(peer));
+                if (relayFactory is null)
+                    services.AddLegacyGameTransport();
+                if (relayFactory is not null)
+                {
+                    services.RemoveAll<IRtcPeerFactory>();
+                    services.AddSingleton(relayFactory);
+                    services.RemoveAll<IDataProtectionProvider>();
+                    services.AddSingleton<IDataProtectionProvider>(new EphemeralDataProtectionProvider());
+                }
+                if (relayCredentials is not null)
+                {
+                    services.RemoveAll<ITurnCredentialProvider>();
+                    services.AddSingleton(relayCredentials);
+                }
             });
         }
 
@@ -407,6 +604,102 @@ public sealed class GameServerTests
                 });
                 next(app);
             };
+        }
+    }
+
+    private sealed class TestTurnCredentials : ITurnCredentialProvider
+    {
+        public int Calls { get; private set; }
+
+        public Task<TurnCredentials> CreateAsync(CancellationToken cancellationToken)
+        {
+            var id = ++Calls;
+            return Task.FromResult(new TurnCredentials(
+                [new TurnIceServer(["turn:turn.cloudflare.com:3478?transport=udp"], $"user-{id}", $"credential-{id}")],
+                DateTimeOffset.UtcNow.AddHours(1)));
+        }
+    }
+
+    private sealed class TestRtcPeer : IRtcPeer, IRtcPeerFactory
+    {
+        internal const string Sdp = "v=0\r\no=- 1 2 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\n" +
+            "m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\n" +
+            "a=candidate:1 1 UDP 123 1.1.1.1 443 typ relay raddr 0.0.0.0 rport 0\r\n";
+
+        internal int Offers { get; private set; }
+        internal ImmutableArray<RtcIceServer> IceServers { get; private set; }
+        internal TaskCompletionSource Disposed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public RtcPeerState State => RtcPeerState.Connected;
+        public event Action<RtcPeerState>? StateChanged { add { } remove { } }
+        public event Action<IRtcChannel>? ChannelReceived;
+
+        internal void Open(IRtcChannel channel) => ChannelReceived?.Invoke(channel);
+
+        public IRtcPeer Create(ImmutableArray<RtcIceServer> iceServers)
+        {
+            IceServers = iceServers;
+            return this;
+        }
+
+        public Task<string> AcceptOfferAsync(string sdp, CancellationToken cancellationToken)
+        {
+            Offers++;
+            return Task.FromResult(Sdp);
+        }
+
+        public IRtcChannel CreateChannel(string label, bool reliable) => throw new NotSupportedException();
+        public Task<string> CreateOfferAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
+        public void AcceptAnswer(string sdp) => throw new NotSupportedException();
+
+        public ValueTask DisposeAsync()
+        {
+            Disposed.TrySetResult();
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class TestRtcChannel(string label) : IRtcChannel
+    {
+        public string Label => label;
+        public bool IsOpen => true;
+        public long BufferedAmount { get; set; }
+        internal bool BufferOnSend { get; init; }
+        public event Action? Opened { add { } remove { } }
+        public event Action? Drained;
+        public event Action? Closed { add { } remove { } }
+        public event Action<ReadOnlyMemory<byte>>? Received;
+        internal System.Threading.Channels.Channel<byte[]> Sent { get; } =
+            System.Threading.Channels.Channel.CreateUnbounded<byte[]>();
+
+        public bool TrySend(ReadOnlySpan<byte> bytes)
+        {
+            if (BufferedAmount != 0)
+                return false;
+            Send(bytes.ToArray());
+            return true;
+        }
+
+        public bool TrySendBatch(IReadOnlyList<byte[]> packets)
+        {
+            if (BufferedAmount != 0)
+                return false;
+            foreach (var packet in packets)
+                Send(packet);
+            return true;
+        }
+
+        private void Send(byte[] bytes)
+        {
+            Sent.Writer.TryWrite(bytes);
+            if (BufferOnSend)
+                BufferedAmount += bytes.Length;
+        }
+        internal void Receive(ReadOnlyMemory<byte> bytes) => Received?.Invoke(bytes);
+
+        internal void Drain()
+        {
+            BufferedAmount = 0;
+            Drained?.Invoke();
         }
     }
 

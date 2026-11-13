@@ -15,13 +15,18 @@ function fixture(send = async () => {}) {
   return { movement, time, calls };
 }
 
-test("sends held state immediately, heartbeats every 250 ms, then neutral", async () => {
+test("sends complete state at 20Hz, including neutral, and stops on disconnect", async () => {
   const { movement, time, calls } = fixture();
+  movement.setConnected(true);
   movement.press("key", "up");
-  await time.advance(750);
+  await time.advance(150);
   movement.release("key");
+  await flush();
+  await time.advance(100);
+  movement.clear(true);
   await time.advance(500);
-  assert.deepEqual(calls, [["up", 0], ["up", 250], ["up", 500], ["up", 750], [null, 750]]);
+  assert.deepEqual(calls, [["up", 0], ["up", 50], ["up", 100], ["up", 150],
+    [null, 150], [null, 200], [null, 250]]);
 });
 
 test("opposite held input sends neutral until one side is released", async () => {
@@ -31,8 +36,8 @@ test("opposite held input sends neutral until one side is released", async () =>
   movement.press("b", "down");
   await time.advance(500);
   movement.release("a");
-  await time.advance(250);
-  assert.deepEqual(calls, [["up", 0], [null, 0], ["down", 500], ["down", 750]]);
+  await flush();
+  assert.deepEqual(calls, [["up", 0], [null, 0], ["down", 500]]);
 });
 
 test("slow sends retain the initial press and latest release, with no replay backlog", async () => {

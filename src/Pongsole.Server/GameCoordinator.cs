@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Threading.Channels;
 using Pongsole.Contracts;
 using Pongsole.Core;
+using Pongsole.Transport;
 
 namespace Pongsole.Server;
 
@@ -12,6 +13,7 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
     private const int RetainedLimit = 64;
     private const int LifecycleCapacity = 128;
     private const int InputCapacity = 1024;
+    private const int RealtimeInputRate = 60;
     private const int CatchUpLimit = 5;
     private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(1d / 60);
     private static readonly TimeSpan ResumeWindow = TimeSpan.FromSeconds(60);
@@ -30,7 +32,7 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
     private int rightCount;
     private bool stopping;
 
-    internal ConnectionLease Admit(string connectionId)
+    internal ConnectionLease Admit(string connectionId, long epoch = 0)
     {
         lock (gate)
         {
@@ -41,9 +43,40 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
             if (connections.Count >= ConnectionLimit)
                 throw GameErrors.CapacityReached();
 
-            var lease = new ConnectionLease(connectionId);
+            var lease = new ConnectionLease(connectionId, epoch);
             connections.Add(connectionId, lease);
             return lease;
+        }
+    }
+
+    internal void ReceiveInput(ConnectionLease lease, long epoch, long sequence, InputState state)
+    {
+        lock (gate)
+        {
+            if (stopping || epoch == 0 || epoch != lease.Epoch || !IsCurrent(lease) ||
+                lease.Session is not { } session || sequence <= session.LastProcessedSequence ||
+                sequence > RealtimePacket.MaxSafeInteger)
+                return;
+
+            session.LastProcessedSequence = sequence;
+            var realtime = lease.Realtime;
+            if (state.IsPulse)
+            {
+                if (state.PulseId <= realtime.LastPulseId)
+                    return;
+                realtime.LastPulseId = state.PulseId;
+            }
+
+            var now = time.GetTimestamp();
+            while (realtime.Updates.TryPeek(out var timestamp) && time.GetElapsedTime(timestamp, now) >= RateWindow)
+                realtime.Updates.Dequeue();
+            if (realtime.Updates.Count < RealtimeInputRate)
+                realtime.Updates.Enqueue(now);
+            else if (state.Direction is not null)
+                return;
+
+            realtime.Latest = state;
+            realtime.ReceivedAt = now;
         }
     }
 
@@ -238,6 +271,7 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
             foreach (var lease in connections.Values)
             {
                 lease.Held.Clear();
+                lease.Realtime.Clear();
                 lease.Snapshots.Writer.TryComplete();
             }
             connections.Clear();
@@ -274,7 +308,9 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
                 if (lease.Session is not { } session)
                     continue;
 
-                var impulse = ProcessHeld(lease.Held, session, canMove, now);
+                var impulse = lease.Epoch == 0
+                    ? ProcessHeld(lease.Held, session, canMove, now)
+                    : ProcessRealtime(lease.Realtime, session, canMove, now);
                 if (session.Team == Team.Left)
                     leftPushes += impulse;
                 else
@@ -292,6 +328,32 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
                     lease.Snapshots.Writer.TryWrite(snapshot);
             }
         }
+    }
+
+    private int ProcessRealtime(RealtimeInput realtime, Session session, bool canMove, long now)
+    {
+        if (!canMove || time.GetElapsedTime(realtime.ReceivedAt, now) >= RateWindow)
+        {
+            realtime.Clear();
+            return 0;
+        }
+
+        var tick = engine.State.Tick + 1;
+        if (realtime.Latest is { } state)
+        {
+            realtime.Latest = null;
+            if (state.IsPulse || state.Direction != realtime.Direction)
+            {
+                realtime.Direction = state.IsPulse ? null : state.Direction;
+                realtime.NextRepeatTick = tick + 6;
+                return state.Direction is { } direction ? ApplyImpulse(session, direction, now) : 0;
+            }
+        }
+
+        if (realtime.Direction is not { } repeating || tick < realtime.NextRepeatTick)
+            return 0;
+        realtime.NextRepeatTick = tick + 6;
+        return ApplyImpulse(session, repeating, now);
     }
 
     private int ProcessPush(InputCommand push, bool canMove, long now)
@@ -395,6 +457,7 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
 
         connections.Remove(lease.ConnectionId);
         lease.Held.Clear();
+        lease.Realtime.Clear();
         lease.Snapshots.Writer.TryComplete();
         if (lease.Session is not { } session)
             return;
@@ -508,15 +571,33 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
 
     private static TaskCompletionSource<T> NewCompletion<T>() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    internal sealed class ConnectionLease(string connectionId)
+    internal sealed class ConnectionLease(string connectionId, long epoch)
     {
         internal string ConnectionId { get; } = connectionId;
+        internal long Epoch { get; } = epoch;
         internal Session? Session { get; set; }
         internal HeldInput Held { get; } = new();
+        internal RealtimeInput Realtime { get; } = new();
         internal int? LatencyMilliseconds { get; set; }
         internal long LatencyMeasuredAt { get; set; }
         internal Channel<GameSnapshot> Snapshots { get; } = Channel.CreateBounded<GameSnapshot>(
             new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
+    }
+
+    internal sealed class RealtimeInput
+    {
+        internal InputState? Latest { get; set; }
+        internal Direction? Direction { get; set; }
+        internal long ReceivedAt { get; set; }
+        internal long NextRepeatTick { get; set; }
+        internal long LastPulseId { get; set; }
+        internal Queue<long> Updates { get; } = new(RealtimeInputRate);
+
+        internal void Clear()
+        {
+            Latest = null;
+            Direction = null;
+        }
     }
 
     internal sealed class HeldInput

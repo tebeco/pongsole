@@ -3,7 +3,7 @@ using Pongsole.Contracts;
 
 namespace Pongsole.Server;
 
-internal sealed class GameHub(GameCoordinator coordinator, IHubContext<GameHub> hub, TimeProvider time) : Hub
+internal sealed class LegacyGameHub(GameCoordinator coordinator, IHubContext<LegacyGameHub> hub, TimeProvider time) : Hub
 {
     private static readonly object LeaseKey = new();
     private GameCoordinator.ConnectionLease Lease => (GameCoordinator.ConnectionLease)Context.Items[LeaseKey]!;

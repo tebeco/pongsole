@@ -1,5 +1,5 @@
 using System.Net;
-using Microsoft.AspNetCore.SignalR;
+
 using Pongsole.Contracts;
 
 namespace Pongsole.Client;
@@ -9,7 +9,6 @@ internal sealed class ClientApplication(
     TimeProvider clock,
     Func<Uri, string?, Action<GameSnapshot>, IGameConnection> connect)
 {
-    private const int MovementQueueCapacity = 10;
     private static readonly TimeSpan FrameInterval = TimeSpan.FromSeconds(1.0 / 30);
     private static readonly TimeSpan[] RetryDelays = [
         TimeSpan.Zero, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)
@@ -84,7 +83,7 @@ internal sealed class ClientApplication(
                 await PlayAsync(connection, history, player, attempt.Token);
                 status = "Reconnecting";
             }
-            catch (HubException error)
+            catch (GameProtocolException error)
             {
                 var marker = ClientError.Marker(error);
                 switch (marker)
@@ -138,7 +137,7 @@ internal sealed class ClientApplication(
         {
             return await connection.JoinAsync(name, player.Token, cancellationToken);
         }
-        catch (HubException error) when (player.Token is not null
+        catch (GameProtocolException error) when (player.Token is not null
             && ClientError.Marker(error) is "PONGSOLE_INVALID_RESUME_TOKEN" or "PONGSOLE_EXPIRED_RESUME_TOKEN")
         {
             player.Clear();
@@ -150,78 +149,34 @@ internal sealed class ClientApplication(
         IGameConnection connection, SnapshotHistory history, PlayerSession player, CancellationToken cancellationToken)
     {
         using var timer = new PeriodicTimer(FrameInterval, clock);
-        using var sending = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var movements = new Queue<Direction>(MovementQueueCapacity);
-        Task? pending = null;
-
+        var input = new ConsoleInputState(clock, connection, player);
         try
         {
             do
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (pending is { IsCompleted: true })
-                {
-                    try
-                    {
-                        await pending;
-                    }
-                    catch (HubException error) when (ClientError.Marker(error) == "PONGSOLE_INPUT_QUEUE_FULL")
-                    {
-                        // The sequence was sent once. Subsequent movements use new sequences.
-                    }
-                    finally
-                    {
-                        pending = null;
-                    }
-                }
-
                 var view = history.Read();
                 player.Reconcile(view.LastProcessed);
-                if (!connection.IsConnected)
-                {
-                    return;
-                }
+                if (!connection.IsConnected) return;
 
                 var (width, height) = terminal.Size;
                 var canMove = GameRenderer.Fits(width, height) && view.Arena?.Phase is Phase.Serving or Phase.Playing;
                 terminal.Draw(GameRenderer.Draw(width, height, view.Arena, view.Players, player.Team, "Connected"));
-                if (!canMove)
-                {
-                    movements.Clear();
-                }
-
+                Direction? latest = null;
                 while (terminal.ReadKey() is { } key)
                 {
                     ThrowIfExit(key);
-                    if (canMove && movements.Count < MovementQueueCapacity && connection.IsConnected
-                        && GameInput.Movement(key.Key) is { } direction)
-                    {
-                        movements.Enqueue(direction);
-                    }
+                    if (canMove && GameInput.Movement(key.Key) is { } direction) latest = direction;
                 }
 
-                if (pending is null && connection.IsConnected && movements.TryDequeue(out var next))
-                {
-                    pending = SendAsync(connection, player, history, next, sending.Token);
-                }
+                input.Update(canMove, latest, view.LastProcessed);
             }
             while (await timer.WaitForNextTickAsync(cancellationToken));
         }
         finally
         {
-            await sending.CancelAsync();
-            if (pending is not null)
-            {
-                await ObserveAsync(pending);
-            }
+            if (connection.IsConnected) input.Release();
         }
-    }
-
-    private static async Task SendAsync(IGameConnection connection, PlayerSession player, SnapshotHistory history,
-        Direction direction, CancellationToken cancellationToken)
-    {
-        var sequence = player.NextSequence(history.LastProcessed);
-        await connection.PushAsync(direction, sequence, cancellationToken);
     }
 
     private async Task WaitWithFramesAsync(Task task, SnapshotHistory history, Team? team,

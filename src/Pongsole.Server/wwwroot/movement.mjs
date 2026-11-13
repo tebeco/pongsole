@@ -1,4 +1,4 @@
-const heartbeatInterval = 250;
+const heartbeatInterval = 50;
 
 export function keyDirection(key) {
   switch (key.toLowerCase()) {
@@ -13,6 +13,7 @@ export function keyDirection(key) {
 export class Movement {
   #held = new Map();
   #timer;
+  #connected = false;
   #pending;
   #sending = false;
   #generation = 0;
@@ -54,20 +55,23 @@ export class Movement {
     this.#queue(null);
   }
 
+  setConnected(connected) {
+    if (connected === this.#connected) return;
+    this.#connected = connected;
+    this.time.clear(this.#timer);
+    if (connected) this.#scheduleHeartbeat();
+  }
+
   #update(previous) {
     const direction = this.#direction;
     this.changed();
-    if (direction === previous) return;
-    this.time.clear(this.#timer);
-    this.#queue(direction);
-    if (direction !== null) this.#scheduleHeartbeat();
+    if (direction !== previous) this.#queue(direction);
   }
 
   #scheduleHeartbeat() {
     this.#timer = this.time.set(() => {
-      const direction = this.#direction;
-      if (!this.enabled() || direction === null) return;
-      this.#queue(direction);
+      if (!this.#connected) return;
+      this.#queue(this.enabled() ? this.#direction : null);
       this.#scheduleHeartbeat();
     }, heartbeatInterval);
   }
@@ -100,8 +104,8 @@ export class Movement {
     const previous = this.#direction;
     const needsNeutral = previous !== null || this.#pending === null;
     this.#held.clear();
-    this.time.clear(this.#timer);
     if (disconnected) {
+      this.setConnected(false);
       this.#generation++;
       this.#pending = undefined;
       this.#sending = false;

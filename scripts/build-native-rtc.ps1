@@ -1,4 +1,4 @@
-param([ValidateSet("linux-x64","linux-arm64","win-x64")][string]$Target = "linux-x64")
+param([ValidateSet("linux-x64","linux-arm64","win-x64","osx-x64","osx-arm64")][string]$Target = "linux-x64")
 $ErrorActionPreference = "Stop"
 $buildRoot = Join-Path (Split-Path $PSScriptRoot -Parent) "artifacts/native-rtc"
 New-Item -ItemType Directory -Force $buildRoot | Out-Null
@@ -16,6 +16,38 @@ $submodules
 if ($LASTEXITCODE -ne 0 -or !$submodules -or ($submodules | Where-Object { !($_.StartsWith(" ")) })) {
     throw "Missing or mismatched upstream submodule."
 }
+if ($Target.StartsWith("osx-")) {
+    if (!$IsMacOS) { throw "A matching macOS host with Xcode tools, CMake, and Homebrew OpenSSL 3 is required." }
+    $arch = if ($Target -eq "osx-arm64") { "arm64" } else { "x86_64" }
+    if ((uname -m) -ne $arch) { throw "Build the native library on a matching macOS architecture." }
+    $openssl = brew --prefix openssl@3
+    if ($LASTEXITCODE -ne 0 -or !(Test-Path (Join-Path $openssl "lib/libssl.a"))) {
+        throw "Install openssl@3 for the native build."
+    }
+    $build = Join-Path $buildRoot $Target
+    $flags = @(
+        "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_OSX_ARCHITECTURES=$arch", "-DBUILD_SHARED_LIBS=ON",
+        "-DBUILD_SHARED_DEPS_LIBS=OFF", "-DNO_MEDIA=ON", "-DNO_WEBSOCKET=ON", "-DNO_EXAMPLES=ON",
+        "-DNO_TESTS=ON", "-DUSE_NICE=OFF", "-DCAPI_STDCALL=OFF", "-DOPENSSL_ROOT_DIR=$openssl",
+        "-DOPENSSL_USE_STATIC_LIBS=TRUE"
+    )
+    cmake -S $source -B $build @flags
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    cmake --build $build --parallel
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $output = Join-Path $buildRoot "native/$Target"
+    New-Item -ItemType Directory -Force $output | Out-Null
+    Copy-Item -LiteralPath (Join-Path $build "libdatachannel.dylib") -Destination $output
+    Get-FileHash (Join-Path $output "libdatachannel.dylib")
+    $dependencies = otool -L (Join-Path $output "libdatachannel.dylib")
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $dependencies
+    if ($dependencies | Select-Object -Skip 1 | Where-Object { $_ -match '\blib(ssl|crypto)\.' }) {
+        throw "The macOS build unexpectedly links dynamic OpenSSL."
+    }
+    exit 0
+}
+
 $script = @'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive

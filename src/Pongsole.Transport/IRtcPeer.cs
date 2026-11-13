@@ -21,6 +21,7 @@ public interface IRtcChannel
     event Action? Closed;
     event Action<ReadOnlyMemory<byte>>? Received;
     bool TrySend(ReadOnlySpan<byte> bytes);
+    bool TrySendBatch(IReadOnlyList<byte[]> packets);
 }
 
 public interface IRtcPeer : IAsyncDisposable

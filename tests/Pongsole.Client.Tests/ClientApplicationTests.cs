@@ -1,5 +1,5 @@
 using System.Net;
-using Microsoft.AspNetCore.SignalR;
+using Pongsole.Transport;
 using Microsoft.Extensions.Time.Testing;
 using Pongsole.Contracts;
 
@@ -16,7 +16,7 @@ public sealed class ClientApplicationTests
         var first = new TestConnection
         {
             Join = (_, _, _) => Task.FromResult(Result(PlayerId, 6, 700)),
-            Push = (_, _, _) => Task.FromException(new IOException())
+            Send = (_, _) => throw new IOException()
         };
         var second = new TestConnection { Join = (_, _, _) => Task.FromResult(Result(PlayerId, 6, 0)) };
         var terminal = new TestTerminal();
@@ -38,7 +38,7 @@ public sealed class ClientApplicationTests
         Assert.Equal(new string?[] { null }, first.Tokens);
         Assert.Equal(new[] { "resume" }, second.Tokens);
         Assert.Equal((Direction.Down, 7L), Assert.Single(first.Pushes));
-        Assert.Equal((Direction.Up, 8L), Assert.Single(second.Pushes));
+        Assert.Equal((Direction.Up, 7L), Assert.Single(second.Pushes));
         Assert.True(first.Disposed && second.Disposed && terminal.Restored);
     }
 
@@ -52,7 +52,7 @@ public sealed class ClientApplicationTests
         var second = new TestConnection
         {
             Join = (_, token, _) => token is not null
-                ? Task.FromException<JoinResult>(new HubException($"Invocation failed: HubException: {marker}."))
+                ? Task.FromException<JoinResult>(new GameProtocolException($"Invocation failed: GameProtocolException: {marker}."))
                 : Task.FromResult(Result(nextId, 0, 1))
         };
         var terminal = new TestTerminal();
@@ -185,7 +185,7 @@ public sealed class ClientApplicationTests
         var terminal = new TestTerminal();
         var connection = new TestConnection
         {
-            Join = (_, _, _) => Task.FromException<JoinResult>(new HubException("Wrapped: PONGSOLE_SESSION_ALREADY_CONNECTED."))
+            Join = (_, _, _) => Task.FromException<JoinResult>(new GameProtocolException("Wrapped: PONGSOLE_SESSION_ALREADY_CONNECTED."))
         };
 
         var error = await Assert.ThrowsAsync<ClientFailure>(() => RunAsync(terminal, (_, _, _) => connection));
@@ -251,12 +251,12 @@ public sealed class ClientApplicationTests
     [InlineData("PONGSOLE_SERVER_STOPPING")]
     public void RecognizesOnlyExactWrappedMarker(string marker)
     {
-        Assert.Equal(marker, ClientError.Marker(new HubException($"SignalR invocation failed: {marker}.")));
-        Assert.Null(ClientError.Marker(new HubException($"SignalR invocation failed: {marker}_EXTRA.")));
+        Assert.Equal(marker, ClientError.Marker(new GameProtocolException($"SignalR invocation failed: {marker}.")));
+        Assert.Null(ClientError.Marker(new GameProtocolException($"SignalR invocation failed: {marker}_EXTRA.")));
     }
 
     [Fact]
-    public async Task DiscardsMovementWhileWaitingOrTooSmallAndDropsQueueFullWithoutResending()
+    public async Task DiscardsMovementWhileWaitingOrTooSmall()
     {
         var terminal = new TestTerminal();
         Action<GameSnapshot>? receive = null;
@@ -267,10 +267,7 @@ public sealed class ClientApplicationTests
         };
         var connection = new TestConnection
         {
-            Join = (_, _, _) => Task.FromResult(waiting),
-            Push = (_, sequence, _) => sequence == 1
-                ? Task.FromException(new HubException("PONGSOLE_INPUT_QUEUE_FULL"))
-                : Task.CompletedTask
+            Join = (_, _, _) => Task.FromResult(waiting)
         };
         var frame = 0;
         terminal.OnDraw = lines =>
@@ -311,7 +308,7 @@ public sealed class ClientApplicationTests
             return connection;
         });
 
-        Assert.Equal(new[] { (Direction.Down, 1L), (Direction.Up, 2L) }, connection.Pushes);
+        Assert.Equal(new[] { Direction.Down, Direction.Up }, connection.Pushes.Select(push => push.Item1).Distinct());
     }
 
     [Fact]
@@ -335,7 +332,7 @@ public sealed class ClientApplicationTests
             {
                 1 => new TestConnection
                 {
-                    Join = (_, _, _) => Task.FromException<JoinResult>(new HubException("PONGSOLE_CAPACITY_REACHED"))
+                    Join = (_, _, _) => Task.FromException<JoinResult>(new GameProtocolException("PONGSOLE_CAPACITY_REACHED"))
                 },
                 <= 6 => new TestConnection { Start = _ => Task.FromException(new HttpRequestException()) },
                 _ => new TestConnection()
@@ -357,7 +354,7 @@ public sealed class ClientApplicationTests
         var terminal = new TestTerminal();
         var rejected = new TestConnection
         {
-            Join = (_, _, _) => Task.FromException<JoinResult>(new HubException("PONGSOLE_INVALID_NAME"))
+            Join = (_, _, _) => Task.FromException<JoinResult>(new GameProtocolException("PONGSOLE_INVALID_NAME"))
         };
         var joined = new TestConnection();
         var attempts = 0;
@@ -405,210 +402,6 @@ public sealed class ClientApplicationTests
         Assert.Equal("Corrected", Assert.Single(connection.Names));
     }
 
-    [Fact]
-    public async Task SendsTwoKeysFromTheSameFrameInOrder()
-    {
-        var connection = new TestConnection();
-        var terminal = new TestTerminal();
-        var frame = 0;
-        terminal.OnDraw = lines =>
-        {
-            if (!lines.Contains("Connected"))
-            {
-                return;
-            }
-
-            if (++frame == 1)
-            {
-                terminal.Enqueue(ConsoleKey.W);
-                terminal.Enqueue(ConsoleKey.S);
-            }
-            else if (connection.Pushes.Count == 2)
-            {
-                terminal.Enqueue(ConsoleKey.Q);
-            }
-        };
-
-        await RunAsync(terminal, (_, _, _) => connection);
-
-        Assert.Equal(new[] { (Direction.Up, 1L), (Direction.Down, 2L) }, connection.Pushes);
-    }
-
-    [Fact]
-    public async Task QueuesConnectedKeysDuringAnInFlightPushAndSendsOnceInOrder()
-    {
-        var firstSend = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var connection = new TestConnection
-        {
-            Push = (_, sequence, cancellationToken) => sequence == 1
-                ? firstSend.Task.WaitAsync(cancellationToken)
-                : Task.CompletedTask
-        };
-        var terminal = new TestTerminal();
-        var frame = 0;
-        terminal.OnDraw = lines =>
-        {
-            if (!lines.Contains("Connected"))
-            {
-                return;
-            }
-
-            switch (++frame)
-            {
-                case 1:
-                    terminal.Enqueue(ConsoleKey.W);
-                    break;
-                case 2:
-                    Assert.Single(connection.Pushes);
-                    terminal.Enqueue(ConsoleKey.S);
-                    terminal.Enqueue(ConsoleKey.W);
-                    break;
-                case 3:
-                    Assert.Single(connection.Pushes);
-                    firstSend.SetResult();
-                    break;
-                default:
-                    if (connection.Pushes.Count == 3)
-                    {
-                        terminal.Enqueue(ConsoleKey.Q);
-                    }
-
-                    break;
-            }
-        };
-
-        await RunAsync(terminal, (_, _, _) => connection);
-
-        Assert.Equal(new[] { (Direction.Up, 1L), (Direction.Down, 2L), (Direction.Up, 3L) }, connection.Pushes);
-    }
-
-    [Fact]
-    public async Task DisconnectDuringInFlightPushDropsUnsentInputAcrossResume()
-    {
-        var token = CancellationToken.None;
-        var first = new TestConnection
-        {
-            Push = (_, _, cancellationToken) =>
-            {
-                token = cancellationToken;
-                return Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-            }
-        };
-        var resumed = new TestConnection();
-        var terminal = new TestTerminal();
-        var attempts = 0;
-        var frame = 0;
-        terminal.OnDraw = lines =>
-        {
-            if (!lines.Contains("Connected"))
-            {
-                return;
-            }
-
-            switch (++frame)
-            {
-                case 1:
-                    terminal.Enqueue(ConsoleKey.W);
-                    terminal.Enqueue(ConsoleKey.S);
-                    break;
-                case 2:
-                    Assert.Single(first.Pushes);
-                    first.IsConnected = false;
-                    break;
-                case 3:
-                    Assert.Equal(2, attempts);
-                    terminal.Enqueue(ConsoleKey.W);
-                    break;
-                case 4:
-                    terminal.Enqueue(ConsoleKey.Q);
-                    break;
-            }
-        };
-
-        await RunAsync(terminal, (_, _, _) => ++attempts == 1 ? first : resumed);
-
-        Assert.True(token.IsCancellationRequested);
-        Assert.Equal((Direction.Up, 1L), Assert.Single(first.Pushes));
-        Assert.Equal((Direction.Up, 2L), Assert.Single(resumed.Pushes));
-        Assert.Equal("resume", Assert.Single(resumed.Tokens));
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task DiscardsQueuedMovementsWhenPlayBecomesUnavailable(bool resize)
-    {
-        var firstSend = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var connection = new TestConnection
-        {
-            Push = (_, sequence, cancellationToken) => sequence == 1
-                ? firstSend.Task.WaitAsync(cancellationToken)
-                : Task.CompletedTask
-        };
-        var terminal = new TestTerminal();
-        Action<GameSnapshot>? receive = null;
-        var playing = Result(PlayerId, 0, 3).Snapshot;
-        var waiting = playing with { Arena = playing.Arena with { Phase = Phase.Waiting, Tick = 2 } };
-        var frame = 0;
-        terminal.OnDraw = lines =>
-        {
-            if (!lines.Contains("Connected"))
-            {
-                return;
-            }
-
-            switch (++frame)
-            {
-                case 1:
-                    terminal.Enqueue(ConsoleKey.W);
-                    terminal.Enqueue(ConsoleKey.S);
-                    break;
-                case 2:
-                    Assert.Single(connection.Pushes);
-                    if (resize)
-                    {
-                        terminal.Size = (79, 24);
-                    }
-                    else
-                    {
-                        receive!(waiting);
-                    }
-
-                    break;
-                case 3:
-                    Assert.Single(connection.Pushes);
-                    firstSend.SetResult();
-                    if (resize)
-                    {
-                        Assert.StartsWith("Resize to 80x24", lines[0]);
-                        terminal.Size = (80, 24);
-                    }
-                    else
-                    {
-                        Assert.Contains("Waiting for players on both teams", lines);
-                        receive!(playing);
-                    }
-
-                    break;
-                case 4:
-                    terminal.Enqueue(ConsoleKey.W);
-                    break;
-                case 5:
-                    terminal.Enqueue(ConsoleKey.Q);
-                    break;
-            }
-        };
-
-        await RunAsync(terminal, (_, _, snapshot) =>
-        {
-            receive = snapshot;
-            return connection;
-        });
-
-        Assert.Equal(new[] { (Direction.Up, 1L), (Direction.Up, 2L) }, connection.Pushes);
-    }
-
-
     private static async Task RunAsync(TestTerminal terminal,
         Func<Uri, string?, Action<GameSnapshot>, IGameConnection> connect,
         ClientOptions? options = null, string? code = null, FakeTimeProvider? clock = null)
@@ -640,7 +433,7 @@ public sealed class ClientApplicationTests
         public Func<CancellationToken, Task> Start { get; init; } = _ => Task.CompletedTask;
         public Func<string, string?, CancellationToken, Task<JoinResult>> Join { get; init; } =
             (_, _, _) => Task.FromResult(Result(PlayerId, 0, 1));
-        public Func<Direction, long, CancellationToken, Task> Push { get; init; } = (_, _, _) => Task.CompletedTask;
+        public Func<InputState, long, bool> Send { get; init; } = (_, _) => true;
         public List<string?> Tokens { get; } = [];
         public List<string> Names { get; } = [];
         public List<(Direction, long)> Pushes { get; } = [];
@@ -654,10 +447,10 @@ public sealed class ClientApplicationTests
             return Join(name, token, cancellationToken);
         }
 
-        public Task PushAsync(Direction direction, long sequence, CancellationToken cancellationToken)
+        public bool TrySend(InputState input, long sequence)
         {
-            Pushes.Add((direction, sequence));
-            return Push(direction, sequence, cancellationToken);
+            if (input.Direction is { } direction) Pushes.Add((direction, sequence));
+            return Send(input, sequence);
         }
 
         public ValueTask DisposeAsync()

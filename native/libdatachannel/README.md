@@ -17,6 +17,11 @@ with the package mirror, so an independent rebuild can have a different hash.
 The checked-in binaries match the SHA-256 values in `manifest.json`. Run
 `node scripts/check-native-rtc.mjs` to verify them. Windows x64 and Ubuntu
 Linux x64 were exercised; Linux ARM64 is built but has not been runtime tested.
-For macOS, a data-only build of the same upstream tag must be supplied as
-`libdatachannel.dylib` in the app-local `runtimes/osx-<arch>/native` directory.
-There is no shipped macOS binary.
+For macOS, install Xcode command-line tools, CMake, and Homebrew `openssl@3`.
+Use a matching native terminal and run `pwsh scripts/build-native-rtc.ps1
+-Target osx-arm64` on Apple Silicon or use `-Target osx-x64` on Intel. Build or
+publish the game afterward. Both server and terminal copy the generated dylib
+into their app-local runtime directory automatically. The build uses static
+OpenSSL, and CI records the installed OpenSSL version and checks linked
+dependencies with `otool -L` before loading the published native library.
+There is no shipped macOS binary, and macOS gameplay has not been verified.
