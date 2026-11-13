@@ -59,6 +59,10 @@ In the Aspire dashboard, select **Play Pongsole** under the `server` resource
 to open the browser game. Aspire uses Private mode, so enter the shared code
 shown by revealing the `game-code` parameter in the dashboard. Set
 `PONGSOLE_SHARED_CODE` before starting Aspire to supply your own code.
+A private invite link can include the code as a fragment,
+`https://<game-host>/#code=<URL-encoded-code>`. The browser tries it once on
+opening the link and removes the code from the address after a successful unlock.
+Share invite links privately because they contain the access code.
 Use the same HTTPS origin and code to join from a separate terminal. Stop the
 foreground AppHost with **Ctrl+C**.
 
