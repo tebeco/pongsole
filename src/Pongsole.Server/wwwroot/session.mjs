@@ -135,7 +135,6 @@ export class GameSession {
     try {
       const connection = this.socket();
       attempt.connection = connection;
-      connection.on("LatencyProbe", nonce => nonce);
       connection.on("Snapshot", snapshot => {
         if (!this.#isCurrent(attempt)) return;
         if (joined) this.#accept(snapshot);
@@ -188,6 +187,20 @@ export class GameSession {
 
   #handleError(attempt, error, disconnected = false) {
     const reason = marker(error);
+    if (["PONGSOLE_TURN_NOT_CONFIGURED", "PONGSOLE_TURN_UNAVAILABLE"].includes(reason)) {
+      const { previous } = this.#replaceAttempt();
+      void this.#stop(previous);
+      this.#show("unavailable", reason === "PONGSOLE_TURN_NOT_CONFIGURED"
+        ? "Relay access is not configured. Contact the game host."
+        : "Relay connection unavailable. Try again.");
+      return;
+    }
+    if (reason === "PONGSOLE_RTC_RATE_LIMIT") {
+      const { previous } = this.#replaceAttempt();
+      void this.#stop(previous);
+      this.#show("unavailable", "Too many connection attempts. Wait a minute and try again.");
+      return;
+    }
     if (reason === "PONGSOLE_CAPACITY_REACHED") {
       this.#schedule(attempt, "Server full. Retrying in 10 seconds.", true);
       return;

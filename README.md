@@ -117,9 +117,16 @@ passes the settings only to the game server. Keep the API token out of invite
 links, chat, and the repository. A standalone server can use
 `Pong__Turn__KeyId` and `Pong__Turn__ApiToken`.
 
-The credential provider is optional and does not change the current game
-transport by itself. Cloudflare bills standalone TURN relay traffic at
+Gameplay requires TURN configuration, including for local matches. The public
+HTTP tunnel serves the page and signaling; gameplay uses relay-only WebRTC
+over UDP, with no inbound router or firewall ports to open. Each connection uses
+short-lived TURN credentials. Cloudflare bills standalone TURN relay traffic at
 $0.05 per outbound GB. See [Cloudflare Realtime TURN](https://developers.cloudflare.com/realtime/turn/).
+
+The server and terminal ship app-local native WebRTC assets for Windows x64 and
+Ubuntu Linux x64. Linux ARM64 assets are built but not runtime tested. macOS
+uses a source build from the same pinned release before building or publishing Pongsole.
+See [native build and platform details](native/libdatachannel/README.md).
 
 ## Host a private game over HTTPS
 
@@ -174,12 +181,10 @@ dotnet test Pongsole.slnx --no-build
 ```
 
 The .NET build, publish, and server runtime use the checked-in browser assets.
-To verify the vendored SignalR files and run the browser unit tests, use Node.js
-26 with npm:
+To verify the packaged native runtime and run the browser tests, use Node.js 26:
 
 ```sh
-npm ci --ignore-scripts
-node scripts/vendor-signalr.mjs --check
+node scripts/check-native-rtc.mjs
 node --test "tests/Pongsole.Browser.Tests/*.test.mjs"
 ```
 

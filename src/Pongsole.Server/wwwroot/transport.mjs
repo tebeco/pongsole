@@ -1,3 +1,5 @@
+import { RelayGameConnection } from "./relay-connection.mjs";
+
 export class AccessError extends Error {
   constructor(status) {
     super("Arena access request failed.");
@@ -17,14 +19,6 @@ export async function browserSession(signal, code, request = fetch) {
   return code === undefined ? response.json() : undefined;
 }
 
-export function gameSocket(signalR = globalThis.signalR) {
-  return new signalR.HubConnectionBuilder()
-    .withUrl("/game", {
-      transport: signalR.HttpTransportType.WebSockets,
-      skipNegotiation: true,
-      withCredentials: true,
-      logger: signalR.LogLevel.None,
-    })
-    .configureLogging(signalR.LogLevel.None)
-    .build();
+export function gameSocket(options) {
+  return new RelayGameConnection(options);
 }

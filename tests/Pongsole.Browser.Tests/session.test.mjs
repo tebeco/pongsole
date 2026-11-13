@@ -25,17 +25,12 @@ class Socket {
   }
 
   on(method, callback) {
-    if (method === "LatencyProbe") {
-      this.latencyProbe = callback;
-      return;
-    }
     assert.equal(method, "Snapshot");
     this.snapshot = callback;
   }
   onclose(callback) { this.closed = callback; }
   async start() {
     assert.equal(typeof this.snapshot, "function");
-    assert.equal(this.latencyProbe("nonce"), "nonce");
     this.state = "Connected";
   }
   async stop() { this.stops++; this.state = "Disconnected"; }

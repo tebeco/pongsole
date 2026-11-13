@@ -408,6 +408,7 @@ public sealed class BrowserAccessTests
 
                 services.RemoveAll<IDataProtectionProvider>();
                 services.AddSingleton(keys);
+                services.AddLegacyGameTransport();
             });
         }
 

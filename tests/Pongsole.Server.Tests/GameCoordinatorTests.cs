@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Time.Testing;
 using Pongsole.Contracts;
 using Pongsole.Core;
+using Pongsole.Transport;
 
 namespace Pongsole.Server.Tests;
 
@@ -10,6 +11,103 @@ public sealed class GameCoordinatorTests
     private readonly FakeTimeProvider time = new();
     private readonly GameEngine engine = new(1);
     private GameCoordinator NewCoordinator() => new(engine, time, new Random(2));
+
+    [Fact]
+    public async Task RealtimeNeutralOverwritesPendingInputAndOldPacketsCannotRestoreIt()
+    {
+        using var coordinator = NewCoordinator();
+        var lease = coordinator.Admit("player", 10);
+        coordinator.Admit("opponent");
+        var join = await Complete(coordinator, coordinator.JoinAsync(lease, "Player", null));
+        await Complete(coordinator, coordinator.JoinAsync("opponent", "Opponent", null));
+
+        coordinator.ReceiveInput(lease, 10, 2, new InputState(Direction.Up, false, 0));
+        coordinator.ReceiveInput(lease, 10, 4, new InputState(null, false, 0));
+        coordinator.ReceiveInput(lease, 10, 3, new InputState(Direction.Down, false, 0));
+        coordinator.ReceiveInput(lease, 10, 4, new InputState(Direction.Down, false, 0));
+        coordinator.ReceiveInput(lease, 9, 5, new InputState(Direction.Down, false, 0));
+
+        var snapshot = await ReadSnapshot(coordinator, "player");
+        var player = snapshot.Players.Single(player => player.PlayerId == join.PlayerId);
+        Assert.Equal(4, player.LastProcessedSequence);
+        Assert.Equal(0, player.RecentPushCount);
+    }
+
+    [Fact]
+    public async Task RealtimePulseDeduplicationAndHeldLeaseExpiryDoNotReplayMovement()
+    {
+        using var coordinator = NewCoordinator();
+        var lease = coordinator.Admit("player", 10);
+        coordinator.Admit("opponent");
+        var join = await Complete(coordinator, coordinator.JoinAsync(lease, "Player", null));
+        await Complete(coordinator, coordinator.JoinAsync("opponent", "Opponent", null));
+        PlayerState Player(GameSnapshot state) => state.Players.Single(player => player.PlayerId == join.PlayerId);
+
+        coordinator.ReceiveInput(lease, 10, 1, new InputState(Direction.Up, true, 1));
+        coordinator.Tick();
+        coordinator.ReceiveInput(lease, 10, 2, new InputState(Direction.Up, true, 1));
+        var first = Player(await ReadSnapshot(coordinator, "player"));
+        Assert.Equal(1, first.RecentPushCount);
+        Assert.Equal(2, first.LastProcessedSequence);
+
+        coordinator.ReceiveInput(lease, 10, 3, new InputState(Direction.Down, false, 0));
+        var held = Player(await ReadSnapshot(coordinator, "player"));
+        Assert.NotNull(held.LastDownTick);
+        time.Advance(TimeSpan.FromSeconds(1));
+        for (var tick = 0; tick < 10; tick++)
+            coordinator.Tick();
+        var expired = Player(await ReadSnapshot(coordinator, "player"));
+        Assert.Equal(held.LastDownTick, expired.LastDownTick);
+    }
+
+    [Fact]
+    public async Task RealtimeCapsImpulseRateAndAlwaysHonorsNeutral()
+    {
+        using var coordinator = NewCoordinator();
+        var lease = coordinator.Admit("player", 10);
+        coordinator.Admit("opponent");
+        var join = await Complete(coordinator, coordinator.JoinAsync(lease, "Player", null));
+        await Complete(coordinator, coordinator.JoinAsync("opponent", "Opponent", null));
+
+        for (var sequence = 1; sequence <= 60; sequence++)
+        {
+            coordinator.ReceiveInput(lease, 10, sequence, new InputState(Direction.Up, true, sequence));
+            coordinator.Tick();
+        }
+
+        coordinator.ReceiveInput(lease, 10, 61, new InputState(Direction.Down, false, 0));
+        coordinator.ReceiveInput(lease, 10, 62, new InputState(null, false, 0));
+        var player = (await ReadSnapshot(coordinator, "player")).Players.Single(player => player.PlayerId == join.PlayerId);
+        Assert.Equal(62, player.LastProcessedSequence);
+        Assert.Equal(10, player.RecentPushCount);
+        Assert.Null(player.LastDownTick);
+    }
+
+    [Fact]
+    public async Task RealtimeResumeRetainsProcessedSequenceAndRejectsPreviousLease()
+    {
+        using var coordinator = NewCoordinator();
+        var old = coordinator.Admit("old", 10);
+        coordinator.Admit("opponent");
+        var join = await Complete(coordinator, coordinator.JoinAsync(old, "Player", null));
+        await Complete(coordinator, coordinator.JoinAsync("opponent", "Opponent", null));
+        coordinator.ReceiveInput(old, 10, 4, new InputState(Direction.Up, false, 0));
+        await Complete(coordinator, coordinator.DisconnectAsync(old));
+
+        var current = coordinator.Admit("current", 11);
+        var resumed = await Complete(coordinator, coordinator.JoinAsync(current, "", join.ResumeToken));
+        Assert.Equal(join.PlayerId, resumed.PlayerId);
+        Assert.Equal(4, resumed.LastProcessedSequence);
+
+        coordinator.ReceiveInput(old, 10, 6, new InputState(Direction.Up, false, 0));
+        coordinator.ReceiveInput(current, 10, 6, new InputState(Direction.Up, false, 0));
+        coordinator.ReceiveInput(current, 11, 4, new InputState(Direction.Up, false, 0));
+        coordinator.ReceiveInput(current, 11, 5, new InputState(Direction.Down, true, 1));
+        var player = (await ReadSnapshot(coordinator, "current")).Players.Single(player => player.PlayerId == join.PlayerId);
+        Assert.Equal(5, player.LastProcessedSequence);
+        Assert.Null(player.LastUpTick);
+        Assert.NotNull(player.LastDownTick);
+    }
 
     [Fact]
     public async Task HeldAndDiscreteInputsShareTheImpulseLimitAndOppositesCancel()

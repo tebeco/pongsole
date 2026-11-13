@@ -46,12 +46,11 @@ internal sealed class GameAccess
 
     internal void Apply(WebApplication app)
     {
-        if (codeHash is not null && forwarding is not null)
-            app.UseForwardedHeaders(forwarding);
+        ApplyForwarding(app);
 
         app.Use(async (context, next) =>
         {
-            if (!context.Request.Path.StartsWithSegments("/game"))
+            if (!context.Request.Path.StartsWithSegments("/rtc"))
             {
                 await next(context);
                 return;
@@ -65,13 +64,25 @@ internal sealed class GameAccess
         });
     }
 
+    internal void ApplyForwarding(IApplicationBuilder app)
+    {
+        if (codeHash is not null && forwarding is not null)
+            app.UseForwardedHeaders(forwarding);
+    }
+
     internal bool IsLoopback => codeHash is null;
 
-    private async Task<int?> RejectionStatusAsync(HttpContext context)
+    internal async Task<int?> RejectionStatusAsync(HttpContext context)
     {
         var request = context.Request;
         var hasOrigin = request.Headers.ContainsKey("Origin");
         if (hasOrigin && !BrowserAccess.HasSameOrigin(request))
+            return StatusCodes.Status403Forbidden;
+        var isSignaling = request.Path.StartsWithSegments("/rtc");
+        if (isSignaling)
+            context.Response.Headers.CacheControl = "no-store";
+        if (hasOrigin && isSignaling &&
+            (!request.Headers.TryGetValue("X-Pong-Browser", out var marker) || marker.Count != 1 || marker[0] != "1"))
             return StatusCodes.Status403Forbidden;
 
         if (IsLoopback)
@@ -80,7 +91,7 @@ internal sealed class GameAccess
             return local ? null : StatusCodes.Status403Forbidden;
         }
 
-        if (!request.IsHttps || request.Headers.ContainsKey("X-Pong-Code"))
+        if (!request.IsHttps || !hasOrigin || !isSignaling && request.Headers.ContainsKey("X-Pong-Code"))
             return CodeRejection(request);
 
         return hasOrigin && await BrowserAccess.HasTicketAsync(context)

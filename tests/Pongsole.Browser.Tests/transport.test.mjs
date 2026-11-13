@@ -16,21 +16,3 @@ test("uses the same-origin grant endpoint and passes the code in a header only",
   assert.deepEqual(calls[1][1].headers, { "X-Pong-Browser": "1", "X-Pong-Code": "secret" });
   assert.equal(calls[1][1].redirect, "error");
 });
-
-test("uses same-origin WebSockets without negotiate or access tokens", () => {
-  let configuration;
-  const signalR = {
-    HttpTransportType: { WebSockets: 1 },
-    LogLevel: { None: 6 },
-    HubConnectionBuilder: class {
-      withUrl(...args) { configuration = args; return this; }
-      configureLogging() { return this; }
-      build() { return {}; }
-    },
-  };
-  gameSocket(signalR);
-  assert.equal(configuration[0], "/game");
-  assert.equal(configuration[1].transport, 1);
-  assert.equal(configuration[1].skipNegotiation, true);
-  assert.equal(configuration[1].accessTokenFactory, undefined);
-});

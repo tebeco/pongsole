@@ -4,7 +4,8 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Pongsole.Contracts/Pongsole.Contracts.csproj" />
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+    <ProjectReference Include="../Pongsole.Transport/Pongsole.Transport.csproj" />
     <InternalsVisibleTo Include="Pongsole.Client.Tests" />
   </ItemGroup>
+  <Import Project="../../NativeRtcAssets.props" />
 </Project>

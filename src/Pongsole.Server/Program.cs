@@ -1,7 +1,8 @@
 using System.Security.Cryptography;
-using Pongsole.Contracts;
 using Pongsole.Core;
 using Pongsole.Server;
+using Pongsole.Transport;
+using Pongsole.Transport.Native;
 
 var builder = WebApplication.CreateBuilder(args);
 if (string.IsNullOrWhiteSpace(builder.Configuration[WebHostDefaults.ServerUrlsKey]))
@@ -11,12 +12,7 @@ if (string.IsNullOrWhiteSpace(builder.Configuration[WebHostDefaults.ServerUrlsKe
 builder.Configuration["ForwardedHeaders_Enabled"] = "false";
 builder.AddHealthChecks();
 OpenTelemetryExtensions.AddOpenTelemetry(builder);
-// Disable the SignalR dispatcher category because its diagnostics can include resume tokens.
-builder.Logging.AddFilter("Microsoft.AspNetCore.SignalR.Internal.DefaultHubDispatcher", LogLevel.None);
-// SignalR transport tokens also appear in request URLs and connection manager debug logs.
 builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
-builder.Logging.AddFilter("Microsoft.AspNetCore.Http.Connections.Internal.HttpConnectionManager", LogLevel.Information);
-builder.Services.AddSignalR().AddJsonProtocol(options => GameJson.Configure(options.PayloadSerializerOptions));
 builder.Services.AddSingleton(TimeProvider.System);
 BrowserAccess.AddServices(builder.Services);
 builder.Services.AddSingleton(builder.Configuration.GetSection("Pong:Turn").Get<TurnOptions>() ?? new());
@@ -28,6 +24,9 @@ builder.Services.AddSingleton(services => new GameCoordinator(
     services.GetRequiredService<GameEngine>(), services.GetRequiredService<TimeProvider>(), Random.Shared));
 builder.Services.AddSingleton<IGameCoordinator>(services => services.GetRequiredService<GameCoordinator>());
 builder.Services.AddHostedService(services => services.GetRequiredService<GameCoordinator>());
+builder.Services.AddSingleton<IRtcPeerFactory, NativeRtcPeerFactory>();
+builder.Services.AddSingleton<RtcSessions>();
+builder.Services.AddHostedService(services => services.GetRequiredService<RtcSessions>());
 
 var app = builder.Build();
 var access = new GameAccess(app.Configuration);
@@ -36,7 +35,7 @@ app.UseAuthentication();
 app.UseHomepage();
 app.UseStaticFiles();
 app.Services.GetRequiredService<BrowserAccess>().MapEndpoints(app, access);
-app.MapHub<GameHub>("/game");
+RtcEndpoints.Map(app);
 app.MapHealthCheckEndpoints();
 app.Run();
 

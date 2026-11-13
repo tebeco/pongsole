@@ -22,8 +22,7 @@ internal static class OpenTelemetryExtensions
             .WithTracing(tracing => tracing
                 .AddAspNetCoreInstrumentation(options => options.Filter = context =>
                     context.Request.Path != "/health" && context.Request.Path != "/alive"
-                    // SignalR transport URLs can carry connection tokens.
-                    && !context.Request.Path.StartsWithSegments("/game"))
+                    && !context.Request.Path.StartsWithSegments("/rtc"))
                 .AddHttpClientInstrumentation(options => options.FilterHttpRequestMessage =
                     request => request.RequestUri?.Host != CloudflareTurnCredentialProvider.ApiHost));
 
