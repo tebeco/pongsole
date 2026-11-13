@@ -27,7 +27,7 @@ public sealed class ClientApplicationTests
             {
                 terminal.Enqueue(ConsoleKey.W);
             }
-            else if (lines.Contains("Connected"))
+            else if (lines.Any(line => line.StartsWith("Connected", StringComparison.Ordinal)))
             {
                 terminal.Enqueue(connects == 1 ? ConsoleKey.S : second.Pushes.Count == 0 ? ConsoleKey.UpArrow : ConsoleKey.Q);
             }
@@ -59,7 +59,7 @@ public sealed class ClientApplicationTests
         var connects = 0;
         terminal.OnDraw = lines =>
         {
-            if (!lines.Contains("Connected"))
+            if (!lines.Any(line => line.StartsWith("Connected", StringComparison.Ordinal)))
             {
                 return;
             }
@@ -105,7 +105,7 @@ public sealed class ClientApplicationTests
                     terminal.EnqueueText(secret);
                 }
             }
-            else if (lines.Contains("Connected"))
+            else if (lines.Any(line => line.StartsWith("Connected", StringComparison.Ordinal)))
             {
                 terminal.Enqueue(ConsoleKey.Q);
             }
@@ -139,7 +139,7 @@ public sealed class ClientApplicationTests
                 terminal.EnqueueText("PlayerTwo");
                 terminal.Enqueue(ConsoleKey.Enter);
             }
-            else if (lines.Contains("Connected"))
+            else if (lines.Any(line => line.StartsWith("Connected", StringComparison.Ordinal)))
             {
                 terminal.Enqueue(ConsoleKey.Q);
             }
@@ -272,7 +272,7 @@ public sealed class ClientApplicationTests
         var frame = 0;
         terminal.OnDraw = lines =>
         {
-            if (!lines.Contains("Connected"))
+            if (!lines.Any(line => line.StartsWith("Connected", StringComparison.Ordinal)))
             {
                 return;
             }
@@ -319,7 +319,7 @@ public sealed class ClientApplicationTests
         var timestamps = new List<DateTimeOffset>();
         terminal.OnDraw = lines =>
         {
-            if (lines.Contains("Connected"))
+            if (lines.Any(line => line.StartsWith("Connected", StringComparison.Ordinal)))
             {
                 terminal.Enqueue(ConsoleKey.Q);
             }
@@ -365,7 +365,7 @@ public sealed class ClientApplicationTests
                 terminal.EnqueueText("Corrected");
                 terminal.Enqueue(ConsoleKey.Enter);
             }
-            else if (lines.Contains("Connected"))
+            else if (lines.Any(line => line.StartsWith("Connected", StringComparison.Ordinal)))
             {
                 terminal.Enqueue(ConsoleKey.Q);
             }
@@ -390,7 +390,7 @@ public sealed class ClientApplicationTests
                 terminal.EnqueueText("Corrected");
                 terminal.Enqueue(ConsoleKey.Enter);
             }
-            else if (lines.Contains("Connected"))
+            else if (lines.Any(line => line.StartsWith("Connected", StringComparison.Ordinal)))
             {
                 terminal.Enqueue(ConsoleKey.Q);
             }
@@ -400,6 +400,70 @@ public sealed class ClientApplicationTests
         await RunAsync(terminal, (_, _, _) => connection, options);
 
         Assert.Equal("Corrected", Assert.Single(connection.Names));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task OnlyCurrentSelectorCanChooseAndMovementWaitsForAuthoritativeMode(bool localSelector)
+    {
+        var selectorId = localSelector ? PlayerId : Guid.NewGuid();
+        var selector = new PlayerState(selectorId, "Chooser", Team.Left, 0);
+        var waiting = SnapshotHistoryTests.Snapshot(3, 50, [selector]);
+        waiting = waiting with
+        {
+            Arena = waiting.Arena with { Phase = Phase.Waiting, Mode = GameMode.AwaitingSelection },
+            ModeSelectorPlayerId = selectorId
+        };
+        var modes = new List<GameMode>();
+        var accepted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var connection = new TestConnection
+        {
+            Join = (_, _, _) => Task.FromResult(Result(PlayerId, 0, 3) with { Snapshot = waiting }),
+            Select = (mode, token) =>
+            {
+                modes.Add(mode);
+                return accepted.Task.WaitAsync(token);
+            }
+        };
+        var terminal = new TestTerminal();
+        var frame = 0;
+        Action<GameSnapshot>? accept = null;
+        terminal.OnDraw = lines =>
+        {
+            if (!lines.Any(line => line.StartsWith("Connected", StringComparison.Ordinal))) return;
+            switch (++frame)
+            {
+                case 1:
+                    Assert.Contains(lines, line => line.Contains(localSelector ? "1 All together" : "Waiting for Chooser"));
+                    terminal.Enqueue(ConsoleKey.W);
+                    terminal.Enqueue(ConsoleKey.D2);
+                    terminal.Enqueue(ConsoleKey.D1);
+                    break;
+                case 2:
+                    if (localSelector) Assert.Contains("Selecting mode…", lines);
+                    accepted.TrySetResult();
+                    break;
+                case 3:
+                    Assert.Empty(connection.Pushes);
+                    var active = SnapshotHistoryTests.Snapshot(4, 50, [selector]);
+                    accept!(active with { Arena = active.Arena with { Mode = GameMode.IndividualPaddles } });
+                    break;
+                case 4:
+                    Assert.Contains("Connected | Individual paddles", lines);
+                    terminal.Enqueue(ConsoleKey.S);
+                    break;
+                case 5:
+                    terminal.Enqueue(ConsoleKey.Escape);
+                    break;
+            }
+        };
+
+        await RunAsync(terminal, (_, _, snapshot) => { accept = snapshot; return connection; });
+
+        Assert.Equal(localSelector ? [GameMode.IndividualPaddles] : Array.Empty<GameMode>(), modes);
+        Assert.Equal(Direction.Down, Assert.Single(connection.Pushes).Item1);
+        Assert.True(terminal.Restored);
     }
 
     private static async Task RunAsync(TestTerminal terminal,
@@ -446,6 +510,10 @@ public sealed class ClientApplicationTests
             Tokens.Add(token);
             return Join(name, token, cancellationToken);
         }
+
+        public Func<GameMode, CancellationToken, Task> Select { get; init; } = (_, _) => Task.CompletedTask;
+
+        public Task SelectModeAsync(GameMode mode, CancellationToken cancellationToken) => Select(mode, cancellationToken);
 
         public bool TrySend(InputState input, long sequence)
         {

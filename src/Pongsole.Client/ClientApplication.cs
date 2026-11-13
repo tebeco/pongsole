@@ -55,7 +55,7 @@ internal sealed class ClientApplication(
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await WaitWithFramesAsync(Task.Delay(delay, clock, cancellationToken), lastView, player.Team, status, cancellationToken);
+            await WaitWithFramesAsync(Task.Delay(delay, clock, cancellationToken), lastView, player, status, cancellationToken);
             var history = new SnapshotHistory(clock);
 
             try
@@ -67,7 +67,7 @@ internal sealed class ClientApplication(
 
                 try
                 {
-                    await WaitWithFramesAsync(joining, lastView, player.Team, status, attempt.Token);
+                    await WaitWithFramesAsync(joining, lastView, player, status, attempt.Token);
                     join = await joining;
                 }
                 finally
@@ -155,6 +155,8 @@ internal sealed class ClientApplication(
         using var timer = new PeriodicTimer(FrameInterval, clock);
         var input = new ConsoleInputState(clock, connection, player);
         var effects = new PresentationEffects(clock);
+        using var selectionStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var selection = new ModeSelection(connection, selectionStop.Token);
         try
         {
             do
@@ -165,14 +167,19 @@ internal sealed class ClientApplication(
                 if (!connection.IsConnected) return;
 
                 var (width, height) = terminal.Size;
-                var canMove = GameRenderer.Fits(width, height) && view.Arena?.Phase is Phase.Serving or Phase.Playing;
+                var fits = GameRenderer.Fits(width, height);
+                var awaiting = view.Arena?.Mode == GameMode.AwaitingSelection;
+                var isSelector = view.Selector is Guid selector && selector == player.PlayerId;
+                var canMove = fits && !awaiting && view.Arena?.Phase is Phase.Serving or Phase.Playing;
+                await selection.ObserveAsync(awaiting);
                 effects.Observe(view.Arena);
                 terminal.Draw(GameRenderer.Draw(width, height, view.Arena, view.Players, player.Team, "Connected",
-                    terminal.Unicode, terminal.Color, effects));
+                    terminal.Unicode, terminal.Color, effects, player.PlayerId, isSelector, view.SelectorName, selection.Message));
                 Direction? latest = null;
                 while (terminal.ReadKey() is { } key)
                 {
                     ThrowIfExit(key);
+                    if (fits && awaiting && isSelector) selection.Select(key.Key);
                     if (canMove && GameInput.Movement(key.Key) is { } direction) latest = direction;
                 }
 
@@ -182,11 +189,13 @@ internal sealed class ClientApplication(
         }
         finally
         {
+            await selectionStop.CancelAsync();
+            await selection.FinishAsync();
             if (connection.IsConnected) input.Release();
         }
     }
 
-    private async Task WaitWithFramesAsync(Task task, SnapshotHistory history, Team? team,
+    private async Task WaitWithFramesAsync(Task task, SnapshotHistory history, PlayerSession player,
         string status, CancellationToken cancellationToken)
     {
         using var timer = new PeriodicTimer(FrameInterval, clock);
@@ -196,7 +205,8 @@ internal sealed class ClientApplication(
             DiscardKeys();
             var view = history.Read(showActivity: false);
             var (width, height) = terminal.Size;
-            terminal.Draw(GameRenderer.Draw(width, height, view.Arena, view.Players, team, status, terminal.Unicode, terminal.Color));
+            terminal.Draw(GameRenderer.Draw(width, height, view.Arena, view.Players, player.Team, status, terminal.Unicode, terminal.Color,
+                localPlayer: player.PlayerId, selectorName: view.SelectorName));
             if (task.IsCompleted)
             {
                 break;

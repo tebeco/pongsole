@@ -108,3 +108,45 @@ test("draws all balls and the authoritative pickup amount and countdown beneath 
   assert.equal(labels[0][1], labels[1][1]);
   assert.ok(labels[1][2] > labels[0][2]);
 });
+test("interpolates personal paddles by identity and snaps new members and mode changes", () => {
+  const history = new ArenaSnapshots("local");
+  function frame(tick, mode, playerPaddles) {
+    const next = snapshot(tick, [ball(1, 40)]);
+    Object.assign(next.arena, { mode, playerPaddles });
+    return next;
+  }
+  history.accept(frame(1, "allTogether", []), 0);
+  history.accept(frame(2, "individualPaddles", [{ playerId: "local", y: 12 }, { playerId: "left", y: 9 }]), 50);
+  assert.equal(history.frame(50).playerPaddles[0].y, 12);
+  history.accept(frame(3, "individualPaddles", [{ playerId: "new", y: 15 }, { playerId: "local", y: 20 }]), 100);
+  assert.deepEqual(history.frame(125).playerPaddles.map(({ playerId, y }) => [playerId, y]), [["new", 15], ["local", 16]]);
+  assert.equal(history.frame(125, true).playerPaddles[1].y, 20);
+});
+
+test("draws each half-height paddle with the local solid paddle above overlapping ghosts", () => {
+  const rects = [];
+  const noop = () => {};
+  const context = {
+    setTransform: noop, clearRect: noop, setLineDash: noop, beginPath: noop,
+    moveTo: noop, lineTo: noop, stroke: noop, fill: noop, arc: noop,
+    fillRect(...rect) { rects.push([this.globalAlpha, ...rect]); },
+  };
+  const canvas = { getBoundingClientRect: () => ({ width: 100, height: 30 }), getContext: () => context };
+  const arena = {
+    mode: "individualPaddles", balls: [],
+    playerPaddles: [
+      { playerId: "local", team: "left", y: 15 }, { playerId: "opponent", team: "right", y: 21 },
+      { playerId: "teammate", team: "left", y: 15 },
+    ],
+  };
+  const ratio = Object.getOwnPropertyDescriptor(globalThis, "devicePixelRatio");
+  Object.defineProperty(globalThis, "devicePixelRatio", { value: 1, configurable: true });
+  try {
+    drawArena(canvas, arena, { playerId: "local", team: "left" });
+  } finally {
+    if (ratio) Object.defineProperty(globalThis, "devicePixelRatio", ratio);
+    else delete globalThis.devicePixelRatio;
+  }
+  assert.deepEqual(rects, [[.25, 1.5, 13.5, 1, 3], [.7, 97.5, 19.5, 1, 3], [1, 1.5, 13.5, 1, 3]]);
+  assert.equal(context.globalAlpha, 1);
+});

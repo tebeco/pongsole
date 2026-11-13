@@ -2,4 +2,7 @@ using System.Collections.Immutable;
 
 namespace Pongsole.Contracts;
 
-public sealed record GameSnapshot(ArenaState Arena, ImmutableArray<PlayerState> Players);
+public sealed record GameSnapshot(
+    ArenaState Arena,
+    ImmutableArray<PlayerState> Players,
+    Guid? ModeSelectorPlayerId = null);

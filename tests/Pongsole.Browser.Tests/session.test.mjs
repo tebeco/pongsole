@@ -262,3 +262,37 @@ test("missing and invalid invites never open a socket or schedule another access
     assert.deepEqual(run.accessCalls, [code]);
   }
 });
+test("only the current selector can request a mode and a failed request leaves the player connected", async () => {
+  const socket = new Socket();
+  const { session } = fixture([socket]);
+  await session.join("Alice");
+  function pending(tick, selector) {
+    const next = snapshot(tick, 0, "one", "waiting");
+    next.arena.mode = "awaitingSelection";
+    next.modeSelectorPlayerId = selector;
+    return next;
+  }
+  const result = deferred();
+  const choices = [];
+  socket.selectMode = mode => { choices.push(mode); return result.promise; };
+  socket.snapshot(pending(2, "other"));
+  await session.selectMode("allTogether");
+  await session.send("up");
+  assert.deepEqual(choices, []);
+  assert.equal(socket.calls.length, 1);
+  socket.snapshot(pending(3, "one"));
+  const choosing = session.selectMode("individualPaddles");
+  assert.equal(session.choosingMode, true);
+  await session.selectMode("allTogether");
+  assert.deepEqual(choices, ["individualPaddles"]);
+  result.reject(new Error("PONGSOLE_MODE_FORBIDDEN"));
+  await choosing;
+  assert.equal(session.choosingMode, false);
+  assert.equal(session.state, "playing");
+  assert.match(session.modeError, /Another player/);
+  const selected = snapshot(4, 0, "one", "serving");
+  selected.arena.mode = "individualPaddles";
+  socket.snapshot(selected);
+  assert.equal(session.canMove, true);
+  assert.equal(session.modeError, "");
+});

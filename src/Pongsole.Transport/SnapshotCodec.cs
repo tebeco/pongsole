@@ -59,6 +59,26 @@ public static class SnapshotCodec
             writer.Write(player.LatencyMilliseconds is { } latency ? checked((ushort)latency) : ushort.MaxValue);
         }
 
+        var paddles = arena.PlayerPaddles.IsDefault ? ImmutableArray<PlayerPaddleState>.Empty : arena.PlayerPaddles;
+        Check(ValidMode(arena.Mode, arena.Phase, snapshot.ModeSelectorPlayerId, snapshot.Players, paddles));
+        writer.Write((byte)arena.Mode);
+        writer.Write(snapshot.ModeSelectorPlayerId.HasValue);
+        if (snapshot.ModeSelectorPlayerId is { } selector)
+        {
+            selector.TryWriteBytes(uuid, bigEndian: true, out _);
+            writer.Write(uuid);
+        }
+
+        writer.Write((byte)paddles.Length);
+        foreach (var paddle in paddles)
+        {
+            paddle.PlayerId.TryWriteBytes(uuid, bigEndian: true, out _);
+            writer.Write(uuid);
+            writer.Write((byte)paddle.Team);
+            writer.Write(paddle.Y);
+            writer.Write(paddle.Velocity);
+        }
+
         return buffer.ToArray();
     }
 
@@ -129,16 +149,62 @@ public static class SnapshotCodec
                     latency == ushort.MaxValue ? null : latency));
             }
 
-            Check(reader.IsEmpty);
+            var mode = (GameMode)reader.Byte();
+            var selectorFlag = reader.Byte();
+            Check(selectorFlag <= 1);
+            Guid? selector = selectorFlag == 1 ? new Guid(reader.Take(16), bigEndian: true) : null;
+            var paddleCount = reader.Byte();
+            Check(paddleCount <= 64);
+            var paddles = ImmutableArray.CreateBuilder<PlayerPaddleState>(paddleCount);
+            for (var i = 0; i < paddleCount; i++)
+            {
+                paddles.Add(new PlayerPaddleState(new Guid(reader.Take(16), bigEndian: true),
+                    (Team)reader.Byte(), reader.Number(), reader.Number()));
+            }
+
+            var roster = players.MoveToImmutable();
+            var personalPaddles = paddles.MoveToImmutable();
+            Check(reader.IsEmpty && ValidMode(mode, phase, selector, roster, personalPaddles));
             var arena = new ArenaState(tick, leftScore, rightScore, phase, remaining, left, right,
-                balls.MoveToImmutable(), pickups.MoveToImmutable());
-            snapshot = new GameSnapshot(arena, players.MoveToImmutable());
+                balls.MoveToImmutable(), pickups.MoveToImmutable(), mode, personalPaddles);
+            snapshot = new GameSnapshot(arena, roster, selector);
             return true;
         }
         catch (InvalidDataException)
         {
             return false;
         }
+    }
+
+    private static bool ValidMode(GameMode mode, Phase phase, Guid? selector, ImmutableArray<PlayerState> players,
+        ImmutableArray<PlayerPaddleState> paddles)
+    {
+        if (mode == GameMode.AwaitingSelection)
+            return phase == Phase.Waiting && paddles.IsEmpty &&
+                (players.IsEmpty ? selector is null : players.Any(player => player.PlayerId == selector));
+
+        if (selector is not null)
+            return false;
+        if (mode == GameMode.AllTogether)
+            return paddles.IsEmpty;
+        if (mode != GameMode.IndividualPaddles || paddles.Length != players.Length)
+            return false;
+
+        var roster = new Dictionary<Guid, Team>(players.Length);
+        foreach (var player in players)
+        {
+            if (!roster.TryAdd(player.PlayerId, player.Team))
+                return false;
+        }
+
+        foreach (var paddle in paddles)
+        {
+            if (!roster.Remove(paddle.PlayerId, out var team) || team != paddle.Team ||
+                paddle.Y is not (>= 1.5 and <= 28.5) || paddle.Velocity is not (>= -72 and <= 72))
+                return false;
+        }
+
+        return true;
     }
 
     private static void Check(bool valid)

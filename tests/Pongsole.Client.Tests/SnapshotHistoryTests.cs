@@ -88,6 +88,38 @@ public sealed class SnapshotHistoryTests
         Assert.Empty(history.Read().Players);
     }
 
+    [Fact]
+    public void IndividualPaddlesInterpolateByIdAndSnapNewPaddlesOnModeChange()
+    {
+        var clock = new FakeTimeProvider();
+        var history = new SnapshotHistory(clock);
+        var player = new PlayerState(Guid.NewGuid(), "Player", Team.Right, 0);
+        var first = Snapshot(7, 50, [player]);
+        history.EstablishBaseline(new JoinResult(player.PlayerId, player.Team, "token", 0, first));
+        var second = first with
+        {
+            Arena = first.Arena with { Mode = GameMode.IndividualPaddles, PlayerPaddles = [new(player.PlayerId, player.Team, 9, 0)] }
+        };
+        history.Accept(second);
+        Assert.Equal(GameMode.IndividualPaddles, history.Read().Arena!.Mode);
+        Assert.Equal(9, Assert.Single(history.Read().Arena!.PlayerPaddles).Y);
+        var another = Guid.NewGuid();
+        history.Accept(second with
+        {
+            Arena = second.Arena with
+            {
+                Tick = 10,
+                PlayerPaddles = [new(another, Team.Left, 7, 0), new(player.PlayerId, player.Team, 19, 0)]
+            }
+        });
+
+        clock.Advance(TimeSpan.FromMilliseconds(25));
+        var paddles = history.Read().Arena!.PlayerPaddles;
+        Assert.Equal(another, paddles[0].PlayerId);
+        Assert.Equal(7, paddles[0].Y);
+        Assert.Equal(14, paddles[1].Y);
+    }
+
     internal static GameSnapshot Snapshot(long tick, double x, System.Collections.Immutable.ImmutableArray<PlayerState> players) =>
         new(new ArenaState(tick, 0, 0, Phase.Playing, 0, new PaddleState(15, 0), new PaddleState(15, 0),
             [new BallState(1, x, 15, 0, 0)], []), players);

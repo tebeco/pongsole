@@ -62,6 +62,7 @@ public sealed class ConsoleInputStateTests
         public bool IsConnected => true;
         public Task StartAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<JoinResult> JoinAsync(string name, string? token, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task SelectModeAsync(GameMode mode, CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
         public bool TrySend(InputState input, long sequence)

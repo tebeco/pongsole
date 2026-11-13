@@ -50,7 +50,7 @@ export class ArenaSnapshots {
     if (previous && arena.tick < previous.tick) return false;
 
     if (arena.tick !== previous?.tick) {
-      const displayed = previous?.phase === "playing" && arena.phase === "playing" ? this.frame(now) : null;
+      const displayed = previous?.phase === "playing" && arena.phase === "playing" && previous.mode === arena.mode ? this.frame(now) : null;
       this.previous = previous;
       this.receivedAt = now;
       const rtt = snapshot.players.find(player => player.playerId === this.playerId)?.latencyMilliseconds;
@@ -80,17 +80,23 @@ export class ArenaSnapshots {
 
     const previous = this.previous;
     const elapsed = Math.max(0, now - this.receivedAt);
-    const smoothPaddles = previous && current.phase !== "waiting" && current.phase === previous.phase &&
+    const smoothPaddles = previous && current.phase !== "waiting" && current.phase === previous.phase && current.mode === previous.mode &&
       current.leftScore === previous.leftScore && current.rightScore === previous.rightScore;
     if (current.phase !== "playing" && !smoothPaddles) return current;
 
     const amount = Math.min(1, elapsed / 50);
+    const previousPaddles = smoothPaddles && current.mode === "individualPaddles"
+      ? new Map(previous.playerPaddles.map(paddle => [paddle.playerId, paddle])) : null;
     const horizon = Math.min(maxHorizon, this.#lead + elapsed);
     const blend = Math.max(0, 1 - elapsed / correctionDuration);
     return {
       ...current,
       leftPaddle: smoothPaddles ? { y: lerp(previous.leftPaddle.y, current.leftPaddle.y, amount) } : current.leftPaddle,
       rightPaddle: smoothPaddles ? { y: lerp(previous.rightPaddle.y, current.rightPaddle.y, amount) } : current.rightPaddle,
+      playerPaddles: previousPaddles ? current.playerPaddles.map(paddle => {
+        const old = previousPaddles.get(paddle.playerId);
+        return old ? { ...paddle, y: lerp(old.y, paddle.y, amount) } : paddle;
+      }) : current.playerPaddles,
       balls: current.phase === "playing" ? current.balls.map(ball => {
         const position = project(ball, horizon);
         const correction = this.#corrections.get(ball.id);
@@ -105,7 +111,7 @@ export class ArenaSnapshots {
   }
 }
 
-export function drawArena(canvas, arena) {
+export function drawArena(canvas, arena, player) {
   const rect = canvas.getBoundingClientRect();
   const pixelWidth = Math.max(1, Math.round(rect.width * devicePixelRatio));
   const pixelHeight = Math.max(1, Math.round(rect.height * devicePixelRatio));
@@ -129,10 +135,25 @@ export function drawArena(canvas, arena) {
   ctx.arc(50, 15, 4, 0, Math.PI * 2);
   ctx.stroke();
 
-  ctx.fillStyle = "#53edf3";
-  ctx.fillRect(1.5, (arena?.leftPaddle.y ?? 15) - 3, 1, 6);
-  ctx.fillStyle = "#ff927d";
-  ctx.fillRect(97.5, (arena?.rightPaddle.y ?? 15) - 3, 1, 6);
+  if (arena?.mode === "individualPaddles") {
+    for (const opacity of [0.25, 0.7, 1]) {
+      ctx.globalAlpha = opacity;
+      for (const paddle of arena.playerPaddles) {
+        const own = paddle.playerId === player?.playerId;
+        const appearance = own ? 1 : paddle.team === player?.team ? 0.25 : 0.7;
+        if (appearance !== opacity) continue;
+        const left = paddle.team === "left";
+        ctx.fillStyle = left ? "#53edf3" : "#ff927d";
+        ctx.fillRect(left ? 1.5 : 97.5, paddle.y - 1.5, 1, 3);
+      }
+    }
+    ctx.globalAlpha = 1;
+  } else {
+    ctx.fillStyle = "#53edf3";
+    ctx.fillRect(1.5, (arena?.leftPaddle.y ?? 15) - 3, 1, 6);
+    ctx.fillStyle = "#ff927d";
+    ctx.fillRect(97.5, (arena?.rightPaddle.y ?? 15) - 3, 1, 6);
+  }
 
   for (const pickup of arena?.pickups ?? []) {
     const label = "+" + pickup.amount;

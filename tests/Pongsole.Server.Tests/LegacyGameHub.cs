@@ -10,6 +10,8 @@ internal sealed class LegacyGameHub(GameCoordinator coordinator, IHubContext<Leg
 
     public Task<JoinResult> Join(string displayName, string? resumeToken) => coordinator.JoinAsync(Lease, displayName, resumeToken);
 
+    public Task<GameMode> SelectMode(GameMode mode) => coordinator.SelectModeAsync(Lease, mode);
+
     public Task Push(Direction direction, long sequence) => coordinator.PushAsync(Lease, direction, sequence);
 
     public Task SetHeld(Direction? direction, long sequence) => coordinator.SetHeldAsync(Lease, direction, sequence);

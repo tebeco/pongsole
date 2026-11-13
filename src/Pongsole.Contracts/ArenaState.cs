@@ -11,4 +11,10 @@ public sealed record ArenaState(
     PaddleState LeftPaddle,
     PaddleState RightPaddle,
     ImmutableArray<BallState> Balls,
-    ImmutableArray<PickupState> Pickups);
+    ImmutableArray<PickupState> Pickups,
+    GameMode Mode = GameMode.AllTogether,
+    ImmutableArray<PlayerPaddleState> PlayerPaddles = default)
+{
+    public ImmutableArray<PlayerPaddleState> PlayerPaddles { get; init; } =
+        PlayerPaddles.IsDefault ? [] : PlayerPaddles;
+}

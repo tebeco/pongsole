@@ -19,6 +19,8 @@ const labels = {
   checking: "Checking access", ready: "Ready", access: "Access required", unavailable: "Access unavailable",
   connecting: "Connecting", reconnecting: "Reconnecting", playing: "Connected", terminal: "Connection ended",
 };
+const modeButtons = [...document.querySelectorAll("[data-mode]")];
+const modeLabels = { allTogether: "All together", individualPaddles: "Individual paddles" };
 const controls = [...document.querySelectorAll("[data-direction]")];
 let lastAnnouncement = "";
 let previousState;
@@ -67,6 +69,19 @@ function show() {
   byId("play-controls").hidden = !player;
   controls.forEach(button => { button.disabled = !session.canMove; });
   const snapshot = history.newest;
+  const mode = snapshot?.arena.mode;
+  const selecting = mode === "awaitingSelection";
+  const selector = snapshot?.players.find(candidate => candidate.playerId === snapshot.modeSelectorPlayerId);
+  byId("game-mode").hidden = !mode || state !== "playing";
+  byId("mode-status").textContent = selecting ? session.canSelectMode ? "Choose how everyone plays" :
+    selector ? `Waiting for ${selector.displayName} to choose` : "Waiting for a player to choose" : modeLabels[mode] ?? "";
+  const choices = byId("mode-choices");
+  const gainedChoice = choices.hidden && session.canSelectMode;
+  choices.hidden = !session.canSelectMode;
+  for (const button of modeButtons) button.disabled = session.choosingMode;
+  const modeError = byId("mode-error");
+  modeError.textContent = session.modeError;
+  modeError.hidden = !session.modeError;
   rosterPlayers = rosterActivity.update(snapshot, state === "playing", performance.now());
   showRosters();
   const left = snapshot?.arena.leftScore ?? 0;
@@ -76,7 +91,7 @@ function show() {
   byId("left-score").textContent = left;
   byId("right-score").textContent = right;
   byId("players").textContent = `${players} ${players === 1 ? "player" : "players"}`;
-  byId("phase").textContent = phase === "waiting" ? "Waiting for teams" :
+  byId("phase").textContent = selecting ? "Choosing mode" : phase === "waiting" ? "Waiting for teams" :
     phase === "serving" ? `Serve in ${Math.max(0, snapshot.arena.serveTicksRemaining / 60).toFixed(1)}s` :
     phase === "playing" ? "Playing" : "Ready";
   byId("team-label").hidden = !player;
@@ -98,6 +113,7 @@ function show() {
     previousState = state;
   }
 
+  if (gainedChoice) modeButtons[0].focus();
   queueFrame();
 }
 
@@ -106,12 +122,16 @@ function queueFrame() {
   frameId = requestAnimationFrame(now => {
     frameId = undefined;
     const interpolated = session.state === "playing" && !reduceMotion.matches;
-    drawArena(arena, session.history.frame(now, !interpolated));
+    drawArena(arena, session.history.frame(now, !interpolated), session.player);
     if (interpolated) {
       const playing = session.history.newest?.arena.phase === "playing";
       if (now - session.history.receivedAt < (playing ? 250 : 50)) queueFrame();
     }
   });
+}
+
+for (const button of modeButtons) {
+  button.addEventListener("click", () => { void session.selectMode(button.dataset.mode); });
 }
 
 playAgain.addEventListener("click", () => { void session.join(pickNickname()); });

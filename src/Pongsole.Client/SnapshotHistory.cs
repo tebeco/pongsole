@@ -55,17 +55,18 @@ internal sealed class SnapshotHistory(TimeProvider clock)
         }
 
         var now = clock.GetTimestamp();
-        if (newest?.Arena.Tick != snapshot.Arena.Tick)
+        var modeChanged = newest?.Arena.Mode != snapshot.Arena.Mode;
+        if (modeChanged || newest?.Arena.Tick != snapshot.Arena.Tick)
         {
             previousArena = newest?.Arena;
             newestTimestamp = now;
             var latency = snapshot.Players.FirstOrDefault(player => player.PlayerId == playerId)?.LatencyMilliseconds;
             prediction.Accept(snapshot.Arena, latency, now,
-                seedActivity || previousArena?.Phase != snapshot.Arena.Phase);
+                seedActivity || modeChanged || previousArena?.Phase != snapshot.Arena.Phase);
         }
 
-        activity.Accept(snapshot, now, seedActivity || snapshot.Arena.Phase == Phase.Waiting);
-        newest = newest?.Arena.Tick == snapshot.Arena.Tick ? snapshot with { Arena = newest.Arena } : snapshot;
+        activity.Accept(snapshot, now, seedActivity || modeChanged || snapshot.Arena.Phase == Phase.Waiting);
+        newest = !modeChanged && newest?.Arena.Tick == snapshot.Arena.Tick ? snapshot with { Arena = newest.Arena } : snapshot;
         foreach (var player in snapshot.Players)
         {
             if (player.PlayerId == playerId)
@@ -87,37 +88,53 @@ internal sealed class SnapshotHistory(TimeProvider clock)
         }
     }
 
-    public (ArenaState? Arena, RosterPlayer[] Players, long LastProcessed) Read(bool showActivity = true)
+    public (ArenaState? Arena, RosterPlayer[] Players, long LastProcessed, Guid? Selector, string? SelectorName) Read(bool showActivity = true)
     {
         lock (gate)
         {
             if (newest is null)
             {
-                return (null, [], lastProcessed);
+                return (null, [], lastProcessed, null, null);
             }
 
             var timestamp = clock.GetTimestamp();
             var players = newest.Players.Select(player => activity.Read(player, timestamp, showActivity)).ToArray();
-            return (Present(newest.Arena, timestamp), players, lastProcessed);
+            var selector = newest.ModeSelectorPlayerId;
+            var selectorName = newest.Players.FirstOrDefault(player => player.PlayerId == selector)?.DisplayName;
+            return (Present(newest.Arena, timestamp), players, lastProcessed, selector, selectorName);
         }
     }
 
     private ArenaState Present(ArenaState arena, long timestamp)
     {
         var balls = prediction.Read(arena, timestamp);
-        if (previousArena is not { } previous || arena.Phase == Phase.Waiting || arena.Phase != previous.Phase
-            || arena.LeftScore != previous.LeftScore || arena.RightScore != previous.RightScore)
+        var fraction = Math.Clamp(clock.GetElapsedTime(newestTimestamp, timestamp) / SnapshotInterval, 0, 1);
+        if (previousArena is not { } previous || arena.Phase == Phase.Waiting || arena.Phase != previous.Phase || arena.Mode != previous.Mode
+            || (arena.Mode != GameMode.IndividualPaddles
+                && (arena.LeftScore != previous.LeftScore || arena.RightScore != previous.RightScore)))
         {
             return arena with { Balls = balls };
         }
 
-        var fraction = Math.Clamp(clock.GetElapsedTime(newestTimestamp, timestamp) / SnapshotInterval, 0, 1);
         return arena with
         {
             LeftPaddle = arena.LeftPaddle with { Y = Lerp(previous.LeftPaddle.Y, arena.LeftPaddle.Y, fraction) },
             RightPaddle = arena.RightPaddle with { Y = Lerp(previous.RightPaddle.Y, arena.RightPaddle.Y, fraction) },
-            Balls = balls
+            Balls = balls,
+            PlayerPaddles = PresentPaddles(arena, previous, fraction)
         };
+    }
+
+    private static System.Collections.Immutable.ImmutableArray<PlayerPaddleState> PresentPaddles(
+        ArenaState arena, ArenaState previous, double fraction)
+    {
+        if (arena.PlayerPaddles.IsDefaultOrEmpty || previous.PlayerPaddles.IsDefaultOrEmpty)
+            return arena.PlayerPaddles;
+
+        var old = previous.PlayerPaddles.ToDictionary(paddle => paddle.PlayerId);
+        return [.. arena.PlayerPaddles.Select(paddle => old.TryGetValue(paddle.PlayerId, out var prior)
+            ? paddle with { Y = Lerp(prior.Y, paddle.Y, fraction) }
+            : paddle)];
     }
 
     private static double Lerp(double from, double to, double fraction) => from + (to - from) * fraction;

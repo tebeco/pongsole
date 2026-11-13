@@ -34,6 +34,23 @@ public sealed class RtcGameConnectionTests
             Assert.Equal(12, (await join).Snapshot.Arena.Tick);
             Assert.Single(rendered);
 
+            var select = connection.SelectModeAsync(GameMode.IndividualPaddles, timeout.Token);
+            using (var request = System.Text.Json.JsonDocument.Parse(wire.Control.Sent[^1]))
+            {
+                Assert.Equal("selectMode", request.RootElement.GetProperty("type").GetString());
+                Assert.Equal("individualPaddles", request.RootElement.GetProperty("mode").GetString());
+            }
+            Assert.False(select.IsCompleted);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                connection.SelectModeAsync(GameMode.AllTogether, timeout.Token));
+            wire.Control.Emit("""{"type":"modeResult","mode":"individualPaddles"}"""u8.ToArray());
+            await select;
+
+            var reject = connection.SelectModeAsync(GameMode.AllTogether, timeout.Token);
+            wire.Control.Emit("""{"type":"modeResult","code":"PONGSOLE_MODE_LOCKED"}"""u8.ToArray());
+            Assert.Equal("PONGSOLE_MODE_LOCKED", (await Assert.ThrowsAsync<GameProtocolException>(() => reject)).Message);
+            Assert.True(connection.IsConnected);
+
             Assert.True(connection.TrySend(new InputState(Direction.Down, true, 5), 5));
             var input = Assert.Single(wire.Realtime.Sent);
             Assert.True(RealtimePacket.TryRead(input, out var header));

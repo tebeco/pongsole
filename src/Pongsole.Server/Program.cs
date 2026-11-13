@@ -33,7 +33,15 @@ var access = new GameAccess(app.Configuration);
 access.Apply(app);
 app.UseAuthentication();
 app.UseHomepage();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = context =>
+    {
+        if (context.File.Name.EndsWith(".mjs", StringComparison.OrdinalIgnoreCase) ||
+            context.File.Name.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
+            context.Context.Response.Headers.CacheControl = "no-cache";
+    }
+});
 app.Services.GetRequiredService<BrowserAccess>().MapEndpoints(app, access);
 RtcEndpoints.Map(app);
 app.MapHealthCheckEndpoints();

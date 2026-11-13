@@ -4,7 +4,7 @@ export const headerSize = 28;
 export const chunkSize = 972;
 export const maxPayloadSize = 8192;
 const magic = 0x4750;
-const version = 1;
+const version = 2;
 export const kind = Object.freeze({ snapshot: 1, input: 2, probe: 3, echo: 4 });
 
 function validMetadata(type, epoch, id, index, count, length) {
@@ -101,6 +101,7 @@ export class SnapshotReassembly {
 
 const phases = ["waiting", "serving", "playing"];
 const teams = ["left", "right"];
+const modes = ["awaitingSelection", "allTogether", "individualPaddles"];
 const hex = Array.from({ length: 256 }, (_, index) => index.toString(16).padStart(2, "0"));
 function check(valid) {
   if (!valid) throw new RangeError("Invalid realtime snapshot.");
@@ -172,13 +173,16 @@ export function readSnapshot(bytes) {
       return value === -1 ? null : value;
     }
 
-    const playerIds = new Set();
-    const players = list(0, 64, () => {
+    function uuid() {
       const start = take(16);
       const id = Array.from(bytes.subarray(start, start + 16), value => hex[value]).join("");
-      check(id !== "0".repeat(32) && !playerIds.has(id));
-      playerIds.add(id);
-      const playerId = [id.slice(0, 8), id.slice(8, 12), id.slice(12, 16), id.slice(16, 20), id.slice(20)].join("-");
+      check(id !== "0".repeat(32));
+      return [id.slice(0, 8), id.slice(8, 12), id.slice(12, 16), id.slice(16, 20), id.slice(20)].join("-");
+    }
+    const roster = new Map();
+    const players = list(0, 64, () => {
+      const playerId = uuid();
+      check(!roster.has(playerId));
       const nameLength = byte();
       check(nameLength >= 1 && nameLength <= 10);
       const nameStart = take(nameLength);
@@ -191,12 +195,31 @@ export function readSnapshot(bytes) {
       const latency = short();
       check(validName(displayName) && team !== undefined && recentPushCount <= 100 &&
         (latency <= 2000 || latency === 65535));
+      roster.set(playerId, team);
       return { playerId, displayName, team, lastProcessedSequence, recentPushCount, lastUpTick, lastDownTick,
         latencyMilliseconds: latency === 65535 ? null : latency };
     });
+    const mode = modes[byte()];
+    const selectorFlag = byte();
+    check(mode !== undefined && selectorFlag <= 1);
+    const modeSelectorPlayerId = selectorFlag === 1 ? uuid() : null;
+    if (mode === "awaitingSelection") {
+      check(phase === "waiting" && (players.length ? roster.has(modeSelectorPlayerId) : modeSelectorPlayerId === null));
+    } else {
+      check(modeSelectorPlayerId === null);
+    }
+    const paddleCount = mode === "individualPaddles" ? players.length : 0;
+    const playerPaddles = list(paddleCount, paddleCount, () => {
+      const playerId = uuid();
+      const team = teams[byte()];
+      const { y, velocity } = paddle();
+      check(roster.has(playerId) && roster.get(playerId) === team && y >= 1.5 && y <= 28.5 && Math.abs(velocity) <= 72);
+      roster.delete(playerId);
+      return { playerId, team, y, velocity };
+    });
     check(offset === bytes.length);
-    return { arena: { tick, leftScore, rightScore, phase, serveTicksRemaining, leftPaddle, rightPaddle, balls, pickups },
-      players };
+    return { arena: { tick, leftScore, rightScore, phase, serveTicksRemaining, leftPaddle, rightPaddle, balls, pickups,
+      mode, playerPaddles }, players, modeSelectorPlayerId };
   } catch (error) {
     if (error instanceof RangeError) return null;
     throw error;

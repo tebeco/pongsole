@@ -158,6 +158,21 @@ public sealed class GameServerTests
         control.Receive("""{"type":"join","name":"Player"}"""u8.ToArray());
         coordinator.Tick();
         await control.Sent.Reader.ReadAsync(TestContext.Current.CancellationToken);
+        control.Receive("""{"type":"selectMode","mode":"unknown"}"""u8.ToArray());
+        var invalidMode = await control.Sent.Reader.ReadAsync(TestContext.Current.CancellationToken);
+        using (var error = System.Text.Json.JsonDocument.Parse(invalidMode))
+        {
+            Assert.Equal("modeResult", error.RootElement.GetProperty("type").GetString());
+            Assert.Equal("PONGSOLE_INVALID_MODE", error.RootElement.GetProperty("code").GetString());
+        }
+        control.Receive("""{"type":"selectMode","mode":"individualPaddles"}"""u8.ToArray());
+        coordinator.Tick();
+        var selectedMode = await control.Sent.Reader.ReadAsync(TestContext.Current.CancellationToken);
+        using (var selected = System.Text.Json.JsonDocument.Parse(selectedMode))
+        {
+            Assert.Equal("modeResult", selected.RootElement.GetProperty("type").GetString());
+            Assert.Equal("individualPaddles", selected.RootElement.GetProperty("mode").GetString());
+        }
 
         var arena = engine.State with
         {
@@ -168,6 +183,7 @@ public sealed class GameServerTests
         };
         var players = Enumerable.Range(1, 64).Select(index =>
             new PlayerState(Guid.NewGuid(), $"Player{index:0000}", (Team)(index % 2), index)).ToImmutableArray();
+        arena = arena with { PlayerPaddles = [.. players.Select(player => new PlayerPaddleState(player.PlayerId, player.Team, 15, 0))] };
         connection.PublishSnapshot(new GameSnapshot(arena, players));
         connection.PublishSnapshot(new GameSnapshot(arena with { Tick = 12 }, players));
 
@@ -189,6 +205,7 @@ public sealed class GameServerTests
         Assert.NotNull(snapshot);
         Assert.Equal(12, snapshot.Arena.Tick);
         Assert.Equal(64, snapshot.Players.Length);
+        Assert.Equal(64, snapshot.Arena.PlayerPaddles.Length);
         Assert.Equal(10, snapshot.Arena.Balls.Length);
         Assert.Equal(12, snapshot.Arena.Pickups.Length);
         Assert.False(realtime.Sent.Reader.TryRead(out _));
@@ -234,7 +251,8 @@ public sealed class GameServerTests
         PlayerState Sample(GameSnapshot state) => state.Players.Single(candidate => candidate.PlayerId == player.PlayerId);
         var released = await SnapshotWith(updates, state =>
             state.Players.Length == 2 && Sample(state).LastProcessedSequence == sequence);
-        Assert.InRange(Sample(released).RecentPushCount, 8, 12);
+        // Scheduling may put the last several repeats into the next rolling one-second window.
+        Assert.InRange(Sample(released).RecentPushCount, 8, 15);
         Assert.InRange(Assert.IsType<int>(Sample(released).LatencyMilliseconds), 250, 2000);
         var later = await SnapshotWith(updates, state => state.Arena.Tick >= released.Arena.Tick + 24);
         Assert.Equal(Sample(released).RecentPushCount, Sample(later).RecentPushCount);
@@ -445,8 +463,14 @@ public sealed class GameServerTests
         Assert.Equal(expected, response.StatusCode);
     }
 
-    private static Task<JoinResult> Join(HubConnection client, string name, string? token = null) =>
-        client.InvokeAsync<JoinResult>("Join", name, token).WaitAsync(Deadline, TestContext.Current.CancellationToken);
+    private static async Task<JoinResult> Join(HubConnection client, string name, string? token = null)
+    {
+        var cancellation = TestContext.Current.CancellationToken;
+        var result = await client.InvokeAsync<JoinResult>("Join", name, token).WaitAsync(Deadline, cancellation);
+        if (result.Snapshot.ModeSelectorPlayerId == result.PlayerId)
+            await client.InvokeAsync<GameMode>("SelectMode", GameMode.AllTogether, cancellation).WaitAsync(Deadline, cancellation);
+        return result;
+    }
 
     private static Task Push(HubConnection client, Direction direction, long sequence) =>
         client.InvokeAsync("Push", direction, sequence).WaitAsync(Deadline, TestContext.Current.CancellationToken);

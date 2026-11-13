@@ -12,6 +12,7 @@ internal interface IGameConnection : IAsyncDisposable
     bool IsConnected { get; }
     Task StartAsync(CancellationToken cancellationToken);
     Task<JoinResult> JoinAsync(string name, string? token, CancellationToken cancellationToken);
+    Task SelectModeAsync(GameMode mode, CancellationToken cancellationToken);
     bool TrySend(InputState input, long sequence);
 }
 
@@ -28,6 +29,7 @@ internal sealed class GameConnection : IGameConnection
     private readonly TaskCompletionSource opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<GameSnapshot> firstSnapshot = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private TaskCompletionSource<ControlMessage>? joining;
+    private TaskCompletionSource<ControlMessage>? selecting;
     private RtcSession? session;
     private IRtcPeer? peer;
     private IRtcChannel? control;
@@ -117,6 +119,40 @@ internal sealed class GameConnection : IGameConnection
         }
     }
 
+    public async Task SelectModeAsync(GameMode mode, CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+        var response = new TaskCompletionSource<ControlMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (gate)
+        {
+            if (selecting is not null) throw new InvalidOperationException("A mode selection is already pending.");
+            selecting = response;
+        }
+        try
+        {
+            if (control?.TrySend(JsonSerializer.SerializeToUtf8Bytes(new ControlMessage("selectMode", Mode: mode), Json)) != true)
+                throw new IOException("Could not send the mode selection.");
+
+            var result = await response.Task.WaitAsync(timeout.Token);
+            if (result.Code is not null) throw new GameProtocolException(result.Code);
+            if (result.Mode is not (GameMode.AllTogether or GameMode.IndividualPaddles))
+                throw new IOException("Invalid mode selection response.");
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            Disconnected();
+            throw new IOException("The mode selection response timed out.");
+        }
+        finally
+        {
+            lock (gate)
+            {
+                if (selecting == response) selecting = null;
+            }
+        }
+    }
+
     public bool TrySend(InputState input, long sequence)
     {
         if (!IsConnected || session is null || realtime is null) return false;
@@ -137,6 +173,7 @@ internal sealed class GameConnection : IGameConnection
             lock (gate)
             {
                 if (message?.Type == "joined") joining?.TrySetResult(message);
+                else if (message?.Type == "modeResult") selecting?.TrySetResult(message);
                 else if (message?.Type == "error")
                 {
                     var error = new GameProtocolException(message.Code ?? "");
@@ -189,7 +226,11 @@ internal sealed class GameConnection : IGameConnection
         var error = new IOException("The WebRTC connection closed.");
         opened.TrySetException(error);
         firstSnapshot.TrySetException(error);
-        lock (gate) joining?.TrySetException(error);
+        lock (gate)
+        {
+            joining?.TrySetException(error);
+            selecting?.TrySetException(error);
+        }
     }
 
     private CancellationTokenSource ConnectBudget(CancellationToken cancellationToken)

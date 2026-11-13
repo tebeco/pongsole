@@ -9,6 +9,9 @@ internal static class GameErrors
     internal static HubException SessionAlreadyConnected() => new("PONGSOLE_SESSION_ALREADY_CONNECTED");
     internal static HubException AlreadyJoined() => new("PONGSOLE_ALREADY_JOINED");
     internal static HubException InvalidName() => new("PONGSOLE_INVALID_NAME");
+    internal static HubException InvalidMode() => new("PONGSOLE_INVALID_MODE");
+    internal static HubException ModeForbidden() => new("PONGSOLE_MODE_FORBIDDEN");
+    internal static HubException ModeLocked() => new("PONGSOLE_MODE_LOCKED");
     internal static HubException InvalidDirection() => new("PONGSOLE_INVALID_DIRECTION");
     internal static HubException InvalidSequence() => new("PONGSOLE_INVALID_SEQUENCE");
     internal static HubException NotJoined() => new("PONGSOLE_NOT_JOINED");

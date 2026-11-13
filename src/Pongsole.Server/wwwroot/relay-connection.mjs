@@ -106,6 +106,7 @@ export class RelayGameConnection {
   #session;
   #reassembly;
   #joining;
+  #selecting;
   #joined;
   #latestSnapshot;
   #pending;
@@ -220,12 +221,24 @@ export class RelayGameConnection {
     if (method !== "Join" || this.state !== "Connected" || this.#joining) throw new Error("Relay join unavailable.");
     const joining = this.#joining = deferred();
     const signal = AbortSignal.any([this.#controller.signal, AbortSignal.timeout(connectLimit)]);
-    let stage = "session request";
     try {
       this.#sendControl({ type: "join", name, resumeToken });
       return await until(joining.promise, signal);
     } finally {
       this.#joining = undefined;
+    }
+  }
+
+  async selectMode(mode) {
+    if (!["allTogether", "individualPaddles"].includes(mode) || this.state !== "Connected" || !this.#joined || this.#selecting)
+      throw new Error("Relay mode choice unavailable.");
+    const selecting = this.#selecting = deferred();
+    const signal = AbortSignal.any([this.#controller.signal, AbortSignal.timeout(connectLimit)]);
+    try {
+      this.#sendControl({ type: "selectMode", mode });
+      return await until(selecting.promise, signal);
+    } finally {
+      this.#selecting = undefined;
     }
   }
 
@@ -240,7 +253,11 @@ export class RelayGameConnection {
     if (!(data instanceof ArrayBuffer) || data.byteLength > controlLimit) return;
     try {
       const message = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(data));
-      if (message?.type === "error" && this.#joining) {
+      if (message?.type === "modeResult" && this.#selecting) {
+        if (message.code) this.#selecting.reject(new Error(message.code));
+        else if (["allTogether", "individualPaddles"].includes(message.mode)) this.#selecting.resolve(message.mode);
+        else this.#selecting.reject(new Error("Relay mode choice rejected."));
+      } else if (message?.type === "error" && this.#joining) {
         this.#joining.reject(new Error(markers.has(message.code) ? message.code : "Relay join rejected."));
       } else if (message?.type === "joined" && this.#joining &&
           typeof message.playerId === "string" && ["left", "right"].includes(message.team) &&
@@ -256,7 +273,13 @@ export class RelayGameConnection {
 
   #readRealtime(data) {
     if (!(data instanceof ArrayBuffer)) return;
-    const packet = readPacket(new Uint8Array(data));
+    const bytesOnWire = new Uint8Array(data);
+    if (this.#joining && bytesOnWire.length >= 28 &&
+        bytesOnWire[0] === 0x50 && bytesOnWire[1] === 0x47 && bytesOnWire[2] === 1) {
+      this.#joining.reject(new Error("PONGSOLE_PROTOCOL_VERSION"));
+      return;
+    }
+    const packet = readPacket(bytesOnWire);
     if (!packet || packet.epoch !== this.#session.epoch) return;
     if (packet.type === kind.probe) {
       if (this.#realtime.bufferedAmount === 0 && this.#realtime.readyState === "open") {
