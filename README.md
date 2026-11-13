@@ -1,7 +1,12 @@
 # Pongsole
 
-Pongsole is multiplayer Pong in your browser or terminal. Everyone on a team controls the
-same paddle. Browser players receive a random nickname. Terminal players use a
+Pongsole is multiplayer Pong in your browser or terminal. The first player in a new
+room chooses **All together** for one shared paddle per team or **Individual
+paddles** for a half-height paddle per player. In Individual paddles, your paddle
+is solid and your teammates appear as ghosts that can still hit the ball.
+Choose with the buttons above the browser arena or press **1** or **2** in the
+terminal. The choice stays locked until the room and its resumable sessions
+are empty. Browser players receive a random nickname. Terminal players use a
 display name of 1–10 ASCII letters or digits. New players
 join the smaller team, with ties decided randomly.
 
@@ -35,7 +40,8 @@ dotnet run --project src/Pongsole.Server --launch-profile http
 
 Open [http://localhost:5187](http://localhost:5187) in your browser to join
 automatically. Open another browser tab or join from an interactive
-terminal to start a match. A third player shares one team's paddle.
+terminal to start a match. A third player joins one of the teams and either
+shares its paddle or gets a personal paddle, depending on the chosen mode.
 
 ```sh
 dotnet run --project src/Pongsole.Client -- --server http://localhost:5187 --name Bob

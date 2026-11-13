@@ -17,7 +17,8 @@ internal static class GameRenderer
     public static bool Fits(int width, int height) => width >= MinimumWidth && height >= MinimumHeight;
 
     public static ScreenFrame Draw(int width, int height, ArenaState? arena, IReadOnlyList<RosterPlayer> players,
-        Team? team, string status, bool unicode = false, bool color = false, PresentationEffects? effects = null)
+        Team? team, string status, bool unicode = false, bool color = false, PresentationEffects? effects = null,
+        Guid? localPlayer = null, bool isSelector = false, string? selectorName = null, string? modeMessage = null)
     {
         if (!Fits(width, height))
             return ScreenFrame.Plain(width, height, $"Resize to {MinimumWidth}x{MinimumHeight} (now {width}x{height})",
@@ -29,8 +30,20 @@ internal static class GameRenderer
         frame.Add(new Segment($"LEFT {arena.LeftScore}", TeamStyle(Team.Left, effects?.Score(Team.Left) == true)),
             new Segment("  -  "), new Segment($"{arena.RightScore} RIGHT", TeamStyle(Team.Right, effects?.Score(Team.Right) == true)),
             new Segment($"   |   Players {players.Count}   |   Team {team?.ToString() ?? "-"}"));
-        frame.Add(new Segment(status));
-        if (arena.Phase == Phase.Serving)
+        var mode = arena.Mode switch
+        {
+            GameMode.AllTogether => "All together",
+            GameMode.IndividualPaddles => "Individual paddles",
+            _ => null
+        };
+        frame.Add(new Segment(mode is null ? status : $"{status} | {mode}"));
+        if (arena.Mode == GameMode.AwaitingSelection)
+        {
+            var selection = isSelector ? "Choose mode: 1 All together  |  2 Individual paddles"
+                : $"Waiting for {selectorName ?? "the selector"} to choose a mode";
+            frame.Add(new Segment(modeMessage ?? selection));
+        }
+        else if (arena.Phase == Phase.Serving)
         {
             var filled = Math.Clamp((60 - arena.ServeTicksRemaining) / 6, 0, 10);
             frame.Add(new Segment(FormattableString.Invariant($"Serving in {arena.ServeTicksRemaining / 60.0:0.0}s")),
@@ -50,8 +63,16 @@ internal static class GameRenderer
             rows[row, boardWidth / 2] = new Cell(unicode ? '┊' : ':', Dim);
 
         foreach (var pickup in arena.Pickups) DrawPickup(rows, pickup);
-        DrawPaddle(rows, 2, arena.LeftPaddle.Y, Team.Left, unicode);
-        DrawPaddle(rows, 98, arena.RightPaddle.Y, Team.Right, unicode);
+        if (arena.Mode == GameMode.IndividualPaddles)
+        {
+            DrawPersonalPaddles(rows, arena, team, localPlayer, unicode);
+        }
+        else
+        {
+            var glyph = unicode ? '┃' : '|';
+            DrawPaddle(rows, 2, arena.LeftPaddle.Y, 3, glyph, TeamStyle(Team.Left, true));
+            DrawPaddle(rows, 98, arena.RightPaddle.Y, 3, glyph, TeamStyle(Team.Right, true));
+        }
         foreach (var ball in arena.Balls)
         {
             var style = effects?.Ball(ball.Id) == true ? NewBall : Ball;
@@ -168,12 +189,27 @@ internal static class GameRenderer
         for (var index = 0; index < label.Length; index++) rows[row, start + index] = new Cell(label[index], Amber);
     }
 
-    private static void DrawPaddle(Cell[,] rows, double x, double y, Team team, bool unicode)
+    private static void DrawPersonalPaddles(Cell[,] rows, ArenaState arena, Team? localTeam, Guid? localPlayer, bool unicode)
+    {
+        if (arena.PlayerPaddles.IsDefaultOrEmpty) return;
+        foreach (var paddle in arena.PlayerPaddles.OrderBy(paddle =>
+            paddle.PlayerId == localPlayer ? 2 : paddle.Team == localTeam ? 0 : 1))
+        {
+            var own = paddle.PlayerId == localPlayer;
+            var ghost = !own && paddle.Team == localTeam;
+            var style = ghost ? new Style(paddle.Team == Team.Left ? Color.Cyan : Color.Magenta,
+                decoration: Decoration.Dim) : TeamStyle(paddle.Team, own);
+            var glyph = ghost ? (unicode ? '┊' : ':') : (unicode ? '┃' : '|');
+            DrawPaddle(rows, paddle.Team == Team.Left ? 2 : 98, paddle.Y, 1.5, glyph, style);
+        }
+    }
+
+    private static void DrawPaddle(Cell[,] rows, double x, double y, double halfHeight, char glyph, Style style)
     {
         var column = Scale(x, 100, rows.GetLength(1));
-        var style = TeamStyle(team, true);
-        for (var row = Scale(y - 3, 30, rows.GetLength(0)); row <= Scale(y + 3, 30, rows.GetLength(0)); row++)
-            rows[row, column] = new Cell(unicode ? '┃' : '|', style);
+
+        for (var row = Scale(y - halfHeight, 30, rows.GetLength(0)); row <= Scale(y + halfHeight, 30, rows.GetLength(0)); row++)
+            rows[row, column] = new Cell(glyph, style);
     }
 
     private static int Scale(double position, double extent, int cells) =>

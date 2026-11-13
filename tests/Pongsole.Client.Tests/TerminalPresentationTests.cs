@@ -115,6 +115,25 @@ public sealed class TerminalPresentationTests
         Assert.All(lines, line => Assert.True(line.Length <= 79));
     }
     [Fact]
+    public void IndividualPaddlesDrawOwnSolidOverGhostWithOpponentStillVisible()
+    {
+        var own = Guid.NewGuid();
+        var arena = SnapshotHistoryTests.Snapshot(0, 50, []).Arena with
+        {
+            Mode = GameMode.IndividualPaddles,
+            PlayerPaddles = [new(own, Team.Left, 15, 0), new(Guid.NewGuid(), Team.Left, 15, 0),
+                new(Guid.NewGuid(), Team.Left, 4, 0), new(Guid.NewGuid(), Team.Right, 24, 0)]
+        };
+
+        var rows = GameRenderer.Draw(80, 24, arena, [], Team.Left, "Connected", localPlayer: own).Lines;
+        var court = rows.Where(row => row.Length >= 59 && row[20] == '|').Select(row => row.Substring(21, 37)).ToArray();
+        Assert.Contains(court, row => row[1] == ':');
+        Assert.Contains(court, row => row[1] == '|');
+        Assert.Contains(court, row => row[35] == '|');
+        Assert.All(rows, row => Assert.True(row.Length <= 79));
+    }
+
+    [Fact]
     public void MultipleBallsAndOverlapFitMinimumCourt()
     {
         var arena = SnapshotHistoryTests.Snapshot(0, 50, []).Arena with

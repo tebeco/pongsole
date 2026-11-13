@@ -21,7 +21,7 @@ internal sealed class PresentationEffects(TimeProvider clock)
             return;
         }
 
-        var reset = previous is null || arena.Tick < previous.Tick || arena.LeftScore < previous.LeftScore
+        var reset = previous is null || arena.Tick < previous.Tick || arena.Mode != previous.Mode || arena.LeftScore < previous.LeftScore
             || arena.RightScore < previous.RightScore || arena.Phase == Phase.Waiting;
         var now = clock.GetTimestamp();
         if (reset)
