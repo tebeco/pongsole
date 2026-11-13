@@ -38,13 +38,13 @@ public sealed class GameServerTests
         using var thirdSubscription = third.On<GameSnapshot>("Snapshot", observed.Enqueue);
 
         await first.StartAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
-        var alice = await Join(first, " Alice ");
+        var alice = await Join(first, "Alice01234");
         await Push(first, Direction.Down, 1);
         Assert.Equal(Phase.Waiting, alice.Snapshot.Arena.Phase);
         await second.StartAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
         var bob = await Join(second, "Bob");
         Assert.NotEqual(alice.Team, bob.Team);
-        Assert.Equal("Alice", bob.Snapshot.Players.Single(player => player.PlayerId == alice.PlayerId).DisplayName);
+        Assert.Equal("Alice01234", bob.Snapshot.Players.Single(player => player.PlayerId == alice.PlayerId).DisplayName);
 
         await third.StartAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
         var carol = await Join(third, "Carol");
@@ -90,7 +90,8 @@ public sealed class GameServerTests
         await second.StartAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
         await probe.StartAsync(TestContext.Current.CancellationToken).WaitAsync(Deadline, TestContext.Current.CancellationToken);
 
-        await Marker("INVALID_NAME", () => Join(first, "A\t"));
+        foreach (var invalidName in new[] { "", "Alice012345", " Alice", "Alice ", "A\t", "A!", "Al\u00EFce" })
+            await Marker("INVALID_NAME", () => Join(first, invalidName));
         await Marker("INVALID_RESUME_TOKEN", () => Join(first, "Alice", "unknown"));
         var alice = await Join(first, "Alice");
         await Marker("ALREADY_JOINED", () => Join(first, "Again"));

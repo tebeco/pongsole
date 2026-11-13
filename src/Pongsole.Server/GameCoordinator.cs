@@ -16,6 +16,7 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
     private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(1d / 60);
     private static readonly TimeSpan ResumeWindow = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan RateWindow = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan ParticipationWindow = TimeSpan.FromSeconds(10);
 
     private readonly Lock gate = new();
     private readonly Dictionary<string, ConnectionLease> connections = [];
@@ -213,7 +214,7 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
             if (arena.Tick % 3 != 0)
                 return;
 
-            var snapshot = Snapshot();
+            var snapshot = Snapshot(now);
             foreach (var lease in connections.Values)
             {
                 if (lease.Session is not null)
@@ -242,10 +243,17 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
             return 0;
 
         session.AcceptedInputs.Enqueue(now);
+        PruneParticipation(session, now);
+        session.RecentPushes.Enqueue(now);
+        var appliedTick = engine.State.Tick + 1;
+        if (push.Direction == Direction.Up)
+            session.LastUpTick = appliedTick;
+        else
+            session.LastDownTick = appliedTick;
         return push.Direction == Direction.Up ? -1 : 1;
     }
 
-    private JoinResult Join(ConnectionLease lease, string displayName, string? resumeToken)
+    private JoinResult Join(ConnectionLease lease, string displayName, string? resumeToken, long now)
     {
         if (!IsCurrent(lease))
             throw GameErrors.NotJoined();
@@ -264,14 +272,13 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
         }
         else
         {
-            var name = displayName?.Trim();
-            if (name is null || name.Length is < 1 or > 24 || displayName!.Any(char.IsControl))
+            if (!PlayerName.IsValid(displayName))
                 throw GameErrors.InvalidName();
 
             var team = leftCount == rightCount
                 ? (Team)teamRandom.Next(2)
                 : leftCount < rightCount ? Team.Left : Team.Right;
-            session = new Session(Guid.NewGuid(), name, team, Convert.ToHexString(RandomNumberGenerator.GetBytes(32)));
+            session = new Session(Guid.NewGuid(), displayName, team, Convert.ToHexString(RandomNumberGenerator.GetBytes(32)));
             sessions.Add(session.Token, session);
         }
 
@@ -281,7 +288,7 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
             leftCount++;
         else
             rightCount++;
-        return new JoinResult(session.PlayerId, session.Team, session.Token, session.LastProcessedSequence, Snapshot());
+        return new JoinResult(session.PlayerId, session.Team, session.Token, session.LastProcessedSequence, Snapshot(now));
     }
 
     private void Disconnect(ConnectionLease lease, Session? capturedSession, long requestedAt, long now)
@@ -296,6 +303,9 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
 
         lease.Session = null;
         session.Lease = null;
+        session.RecentPushes.Clear();
+        session.LastUpTick = null;
+        session.LastDownTick = null;
         if (session.Team == Team.Left)
             leftCount--;
         else
@@ -346,11 +356,30 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
             tombstones.Remove(tombstoneOrder.Dequeue());
     }
 
-    private GameSnapshot Snapshot() => new(engine.State, connections.Values
+    private GameSnapshot Snapshot(long now) => new(engine.State, connections.Values
         .Where(lease => lease.Session is not null)
-        .Select(lease => lease.Session!)
-        .Select(session => new PlayerState(session.PlayerId, session.DisplayName, session.Team, session.LastProcessedSequence))
+        .Select(lease => PlayerSnapshot(lease.Session!, now))
+        .OrderBy(player => player.Team)
+        .ThenByDescending(player => player.RecentPushCount)
+        .ThenBy(player => player.DisplayName, StringComparer.Ordinal)
+        .ThenBy(player => player.PlayerId)
         .ToImmutableArray());
+
+    private PlayerState PlayerSnapshot(Session session, long now)
+    {
+        PruneParticipation(session, now);
+        return new PlayerState(session.PlayerId, session.DisplayName, session.Team, session.LastProcessedSequence,
+            session.RecentPushes.Count, session.LastUpTick, session.LastDownTick);
+    }
+
+    private void PruneParticipation(Session session, long now)
+    {
+        while (session.RecentPushes.TryPeek(out var timestamp) &&
+            time.GetElapsedTime(timestamp, now) >= ParticipationWindow)
+        {
+            session.RecentPushes.Dequeue();
+        }
+    }
 
     private ConnectionLease GetLease(string connectionId)
     {
@@ -395,6 +424,9 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
         internal long LastProcessedSequence { get; set; }
         internal long DisconnectedAt { get; set; }
         internal Queue<long> AcceptedInputs { get; } = new(10);
+        internal Queue<long> RecentPushes { get; } = new(100);
+        internal long? LastUpTick { get; set; }
+        internal long? LastDownTick { get; set; }
     }
 
     private abstract record LifecycleCommand
@@ -410,7 +442,7 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
         {
             try
             {
-                Completion.TrySetResult(owner.Join(Lease, DisplayName, ResumeToken));
+                Completion.TrySetResult(owner.Join(Lease, DisplayName, ResumeToken, now));
             }
             catch (Microsoft.AspNetCore.SignalR.HubException exception)
             {

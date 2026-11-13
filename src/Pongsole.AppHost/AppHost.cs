@@ -35,7 +35,7 @@ if (builder.ExecutionContext.IsRunMode)
         .WaitFor(server);
 
     var serverEndpoint = server.GetEndpoint("https");
-    foreach (var (resourceName, playerName) in new[] { ("terminal-1", "Terminal 1"), ("terminal-2", "Terminal 2") })
+    foreach (var (resourceName, playerName) in new[] { ("terminal-1", "Terminal1"), ("terminal-2", "Terminal2") })
     {
         // Aspire's interactive resource terminal API is experimental.
 #pragma warning disable ASPIRETERMINAL001
