@@ -109,6 +109,7 @@ export class GameSession {
   }
 
   async leave() {
+    if (this.clearMovement(true)) void this.send(null);
     const { next, previous } = this.#replaceAttempt();
     this.name = "";
     this.player = null;
@@ -135,6 +136,7 @@ export class GameSession {
     try {
       const connection = this.socket();
       attempt.connection = connection;
+      connection.on("LatencyProbe", nonce => nonce);
       connection.on("Snapshot", snapshot => {
         if (!this.#isCurrent(attempt)) return;
         if (joined) this.#accept(snapshot);
@@ -215,16 +217,16 @@ export class GameSession {
 
   async send(direction) {
     const attempt = this.#attempt;
-    if (!this.canMove || attempt.connection.state !== "Connected") return;
+    if ((direction !== null && !this.canMove) || attempt?.connection?.state !== "Connected") return;
     if (this.lastSequence >= Number.MAX_SAFE_INTEGER) {
       this.#handleError(attempt, new Error("PONGSOLE_INVALID_SEQUENCE"));
       return;
     }
     const sequence = ++this.lastSequence;
     try {
-      await attempt.connection.invoke("Push", direction, sequence);
+      await attempt.connection.send("SetHeld", direction, sequence);
     } catch (error) {
-      if (!this.#isCurrent(attempt) || marker(error) === "PONGSOLE_INPUT_QUEUE_FULL") return;
+      if (!this.#isCurrent(attempt)) return;
       this.#handleError(attempt, error, !marker(error) || attempt.connection.state !== "Connected");
     }
   }

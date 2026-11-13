@@ -62,7 +62,11 @@ export function renderRosters(lists, players, activity, now) {
         row.dataset.playerId = player.playerId;
         const name = list.ownerDocument.createElement("span");
         name.className = "roster-name";
-        row.append(name);
+        const identity = list.ownerDocument.createElement("span");
+        const latency = list.ownerDocument.createElement("span");
+        latency.className = "roster-latency";
+        identity.append(name, latency);
+        row.append(identity);
         for (const [direction, arrow, label] of [["up", "↑", "Up"], ["down", "↓", "Down"]]) {
           const icon = list.ownerDocument.createElement("span");
           icon.className = "roster-arrow";
@@ -74,8 +78,14 @@ export function renderRosters(lists, players, activity, now) {
         }
       }
       existing.delete(player.playerId);
-      if (row.firstElementChild.textContent !== player.displayName) {
-        row.firstElementChild.textContent = player.displayName;
+      const [name, latency] = row.firstElementChild.children;
+      if (name.textContent !== player.displayName) name.textContent = player.displayName;
+      const milliseconds = player.latencyMilliseconds;
+      const meter = milliseconds == null ? "(—)" : `(${milliseconds}ms)`;
+      if (latency.textContent !== meter) {
+        latency.textContent = meter;
+        latency.title = milliseconds == null ? "Latency unavailable" : `Round-trip latency: ${milliseconds} milliseconds`;
+        latency.setAttribute("aria-label", latency.title);
       }
       for (const icon of [...row.children].slice(1)) {
         icon.dataset.active = activity.active(player.playerId, icon.dataset.rosterDirection, now);

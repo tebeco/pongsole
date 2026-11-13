@@ -7,4 +7,5 @@ public sealed record PlayerState(
     long LastProcessedSequence,
     int RecentPushCount = 0,
     long? LastUpTick = null,
-    long? LastDownTick = null);
+    long? LastDownTick = null,
+    int? LatencyMilliseconds = null);

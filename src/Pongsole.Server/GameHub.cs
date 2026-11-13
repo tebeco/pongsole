@@ -12,6 +12,8 @@ internal sealed class GameHub(GameCoordinator coordinator, IHubContext<GameHub> 
 
     public Task Push(Direction direction, long sequence) => coordinator.PushAsync(Lease, direction, sequence);
 
+    public Task SetHeld(Direction? direction, long sequence) => coordinator.SetHeldAsync(Lease, direction, sequence);
+
     public override Task OnConnectedAsync()
     {
         var lease = coordinator.Admit(Context.ConnectionId);
@@ -20,6 +22,11 @@ internal sealed class GameHub(GameCoordinator coordinator, IHubContext<GameHub> 
         _ = SnapshotSender.RunAsync(lease.Snapshots.Reader,
             (snapshot, cancellationToken) => client.SendAsync("Snapshot", snapshot, cancellationToken),
             Context.Abort, time, Context.ConnectionAborted);
+        var latencyCoordinator = coordinator;
+        _ = LatencyMonitor.RunAsync(
+            (nonce, token) => client.InvokeAsync<string>("LatencyProbe", nonce, token),
+            (milliseconds, measuredAt) => latencyCoordinator.UpdateLatency(lease, milliseconds, measuredAt),
+            time, Context.ConnectionAborted);
         return Task.CompletedTask;
     }
 

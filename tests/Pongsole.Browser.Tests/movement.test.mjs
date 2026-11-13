@@ -15,49 +15,38 @@ function fixture(send = async () => {}) {
   return { movement, time, calls };
 }
 
-test("retains rapid taps and paces held movement at 100 ms", async () => {
+test("sends held state immediately, heartbeats every 250 ms, then neutral", async () => {
   const { movement, time, calls } = fixture();
-  movement.press("a", "up");
-  movement.release("a");
-  movement.press("b", "down");
-  movement.release("b");
-  assert.deepEqual(calls, [["up", 0]]);
-  await time.advance(100);
-  movement.press("a", "up");
-  await time.advance(300);
-  movement.release("a");
-  await time.advance(300);
-  assert.deepEqual(calls, [["up", 0], ["down", 100], ["up", 200], ["up", 300], ["up", 400], ["up", 500]]);
+  movement.press("key", "up");
+  await time.advance(750);
+  movement.release("key");
+  await time.advance(500);
+  assert.deepEqual(calls, [["up", 0], ["up", 250], ["up", 500], ["up", 750], [null, 750]]);
 });
 
-test("opposite held input cancels pending pulses until one side is released", async () => {
+test("opposite held input sends neutral until one side is released", async () => {
   const { movement, time, calls } = fixture();
   movement.press("a", "up");
+  await flush();
   movement.press("b", "down");
   await time.advance(500);
-  assert.deepEqual(calls, [["up", 0]]);
   movement.release("a");
-  await time.advance(100);
-  assert.deepEqual(calls, [["up", 0], ["down", 600]]);
+  await time.advance(250);
+  assert.deepEqual(calls, [["up", 0], [null, 0], ["down", 500], ["down", 750]]);
 });
 
-test("serializes ten queued movements and drops newest on overflow without catch-up bursts", async () => {
+test("slow sends retain the initial press and latest release, with no replay backlog", async () => {
   const pending = deferred();
   let attempts = 0;
   const { movement, time, calls } = fixture(() => ++attempts === 1 ? pending.promise : Promise.resolve());
-  movement.pulse("up");
-  for (let index = 0; index < 10; index++) movement.pulse(index % 2 ? "down" : "up");
-  movement.pulse("up");
-  await time.advance(500);
-  assert.equal(calls.length, 1);
+  movement.press("key", "down");
+  await time.advance(750);
+  movement.release("key");
+  assert.deepEqual(calls, [["down", 0]]);
   pending.resolve();
   await flush();
-  assert.equal(calls.length, 2);
-  await time.advance(900);
-  assert.deepEqual(calls, [["up", 0], ...Array.from({ length: 10 }, (_, index) => [index % 2 ? "down" : "up", 500 + index * 100])]);
-  for (const [, time] of calls) {
-    assert.ok(calls.filter(([, sent]) => sent > time - 1000 && sent <= time).length <= 10);
-  }
+  await time.advance(500);
+  assert.deepEqual(calls, [["down", 0], [null, 750]]);
 });
 
 test("disconnect drops unsent input and ignores stale completions", async () => {
@@ -66,18 +55,17 @@ test("disconnect drops unsent input and ignores stale completions", async () => 
   let attempts = 0;
   const { movement, time, calls } = fixture(() => [pending.promise, resumed.promise][attempts++]);
   movement.press("key", "up");
-  movement.pulse("down");
+  movement.release("key");
   movement.clear(true);
   await time.advance(100);
-  movement.press("key", "up");
-  movement.pulse("down");
+  movement.press("key", "down");
   pending.resolve();
   await time.advance(100);
-  assert.deepEqual(calls, [["up", 0], ["up", 100]]);
+  assert.deepEqual(calls, [["up", 0], ["down", 100]]);
   resumed.resolve();
   movement.release("key");
   await flush();
-  assert.deepEqual(calls, [["up", 0], ["up", 100], ["down", 200]]);
+  assert.deepEqual(calls, [["up", 0], ["down", 100], [null, 200]]);
 });
 
 class Target {
@@ -107,15 +95,17 @@ test("keyboard ignores editable targets and repeat and requires a new press afte
   assert.equal(window.emit("keydown", key).defaultPrevented, true);
   window.emit("keydown", { ...key, repeat: true });
   window.emit("blur");
+  await flush();
   await time.advance(100);
   window.emit("keydown", { ...key, repeat: true });
-  assert.deepEqual(calls, [["up", 0]]);
+  assert.deepEqual(calls, [["up", 0], [null, 0]]);
   window.emit("keyup", key);
   window.emit("keydown", { key: "ArrowDown", code: "ArrowDown" });
   document.hidden = true;
   document.emit("visibilitychange");
+  await flush();
   await time.advance(200);
-  assert.deepEqual(calls, [["up", 0], ["down", 100]]);
+  assert.deepEqual(calls, [["up", 0], [null, 0], ["down", 100], [null, 100]]);
 });
 
 test("pointer cancellation and lost capture clear held and queued movement without synthetic duplicates", async () => {
@@ -125,14 +115,18 @@ test("pointer cancellation and lost capture clear held and queued movement witho
   up.emit("pointerup", { pointerId: 1 });
   up.emit("lostpointercapture", { pointerId: 1 });
   up.emit("click", { detail: 1 });
+  await flush();
   await time.advance(100);
-  assert.deepEqual(calls, [["up", 0]]);
+  assert.deepEqual(calls, [["up", 0], [null, 0]]);
   down.emit("pointerdown", { pointerId: 2, button: 0 });
   down.emit("pointercancel", { pointerId: 2 });
+  await flush();
   await time.advance(200);
   up.emit("pointerdown", { pointerId: 3, button: 0 });
   up.emit("lostpointercapture", { pointerId: 3 });
+  await flush();
   await time.advance(200);
   down.emit("click", { detail: 0 });
-  assert.deepEqual(calls, [["up", 0], ["down", 100], ["up", 300], ["down", 500]]);
+  await flush();
+  assert.deepEqual(calls, [["up", 0], [null, 0], ["down", 100], [null, 100], ["up", 300], [null, 300], ["down", 500], [null, 500]]);
 });

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.WebSockets;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http.Connections;
@@ -21,6 +22,68 @@ namespace Pongsole.Server.Tests;
 public sealed class GameServerTests
 {
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(10);
+
+    [Fact]
+    public async Task HeldMovementRepeatsWithRealDelayedWebSocketAndStopsAfterRelease()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await using var server = new TestGameServer(IPAddress.Loopback, useWallClock: true);
+        server.StartTicks();
+        await using var held = server.ConnectWebSocket(delayed: true);
+        await using var observer = server.ConnectWebSocket(delayed: false);
+        var updates = new ConcurrentQueue<GameSnapshot>();
+        using var echo = held.On<string, string>("LatencyProbe", nonce => nonce);
+        using var subscription = observer.On<GameSnapshot>("Snapshot", updates.Enqueue);
+        await held.StartAsync(cancellationToken).WaitAsync(Deadline, cancellationToken);
+        var player = await Join(held, "Held");
+        await observer.StartAsync(cancellationToken).WaitAsync(Deadline, cancellationToken);
+        await Join(observer, "Observer");
+        await SnapshotWith(updates, state => state.Arena.Phase != Phase.Waiting);
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        long sequence = 0;
+        while (clock.Elapsed < TimeSpan.FromMilliseconds(1150))
+        {
+            await held.SendAsync("SetHeld", Direction.Up, ++sequence, cancellationToken);
+            await Task.Delay(100, cancellationToken);
+        }
+        await held.SendAsync("SetHeld", null, ++sequence, cancellationToken);
+
+        PlayerState Sample(GameSnapshot state) => state.Players.Single(candidate => candidate.PlayerId == player.PlayerId);
+        var released = await SnapshotWith(updates, state =>
+            state.Players.Length == 2 && Sample(state).LastProcessedSequence == sequence);
+        Assert.InRange(Sample(released).RecentPushCount, 8, 12);
+        Assert.InRange(Assert.IsType<int>(Sample(released).LatencyMilliseconds), 250, 2000);
+        var later = await SnapshotWith(updates, state => state.Arena.Tick >= released.Arena.Tick + 24);
+        Assert.Equal(Sample(released).RecentPushCount, Sample(later).RecentPushCount);
+        Assert.Equal(Sample(released).LastUpTick, Sample(later).LastUpTick);
+    }
+
+
+    [Fact]
+    public async Task ServerPublishesMeasuredRoundTripToAnotherRealClient()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await using var server = new TestGameServer(IPAddress.Loopback);
+        server.StartTicks();
+        await using var measured = server.Connect();
+        await using var observer = server.Connect();
+        var updates = new ConcurrentQueue<GameSnapshot>();
+        using var echo = measured.On<string, string>("LatencyProbe", nonce =>
+        {
+            server.Time.Advance(TimeSpan.FromMilliseconds(42));
+            return nonce;
+        });
+        using var subscription = observer.On<GameSnapshot>("Snapshot", updates.Enqueue);
+        await measured.StartAsync(cancellationToken).WaitAsync(Deadline, cancellationToken);
+        var player = await Join(measured, "Measured");
+        await observer.StartAsync(cancellationToken).WaitAsync(Deadline, cancellationToken);
+        var other = await Join(observer, "Observer");
+        var snapshot = await SnapshotWith(updates, state => state.Players.Any(candidate =>
+            candidate.PlayerId == player.PlayerId && candidate.LatencyMilliseconds == 42));
+        Assert.Null(snapshot.Players.Single(candidate => candidate.PlayerId == other.PlayerId).LatencyMilliseconds);
+    }
+
 
     [Fact]
     public async Task RealClientsSharePaddlesAndReceiveOrderedAuthoritativeSnapshots()
@@ -230,8 +293,40 @@ public sealed class GameServerTests
         }
     }
 
+    private sealed class DelayedProbeSocket(WebSocket inner) : WebSocket
+    {
+        private static readonly TimeSpan Delay = TimeSpan.FromMilliseconds(150);
+        public override WebSocketCloseStatus? CloseStatus => inner.CloseStatus;
+        public override string? CloseStatusDescription => inner.CloseStatusDescription;
+        public override WebSocketState State => inner.State;
+        public override string? SubProtocol => inner.SubProtocol;
+        public override void Abort() => inner.Abort();
+        public override void Dispose() => inner.Dispose();
+        public override Task CloseAsync(WebSocketCloseStatus closeStatus, string? statusDescription,
+            CancellationToken cancellationToken) => inner.CloseAsync(closeStatus, statusDescription, cancellationToken);
+        public override Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription,
+            CancellationToken cancellationToken) => inner.CloseOutputAsync(closeStatus, statusDescription, cancellationToken);
+
+        public override async Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType messageType,
+            bool endOfMessage, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Delay, cancellationToken);
+            await inner.SendAsync(buffer, messageType, endOfMessage, cancellationToken);
+        }
+
+        public override async Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer,
+            CancellationToken cancellationToken)
+        {
+            var result = await inner.ReceiveAsync(buffer, cancellationToken);
+            if (buffer.AsSpan(0, result.Count).IndexOf("LatencyProbe"u8) >= 0)
+                await Task.Delay(Delay, cancellationToken);
+            return result;
+        }
+    }
+
+
     private sealed class TestGameServer(IPAddress peer, string mode = "Loopback", bool knownProxy = false,
-        CapturedLogs? logs = null)
+        CapturedLogs? logs = null, bool useWallClock = false)
         : WebApplicationFactory<Program>
     {
         internal FakeTimeProvider Time { get; } = new();
@@ -249,9 +344,23 @@ public sealed class GameServerTests
             .AddJsonProtocol(options => GameJson.Configure(options.PayloadSerializerOptions))
             .Build();
 
+        internal HubConnection ConnectWebSocket(bool delayed) => new HubConnectionBuilder()
+            .WithUrl(new Uri(Origin(false), "/game"), options =>
+            {
+                options.Transports = HttpTransportType.WebSockets;
+                options.SkipNegotiation = true;
+                options.WebSocketFactory = async (context, cancellationToken) =>
+                {
+                    var socket = await Server.CreateWebSocketClient().ConnectAsync(context.Uri, cancellationToken);
+                    return delayed ? new DelayedProbeSocket(socket) : socket;
+                };
+            })
+            .AddJsonProtocol(options => GameJson.Configure(options.PayloadSerializerOptions))
+            .Build();
+
         private TickPump? ticks;
 
-        internal void StartTicks() => ticks = new TickPump(Services.GetRequiredService<GameCoordinator>());
+        internal void StartTicks() => ticks = new TickPump(Services.GetRequiredService<GameCoordinator>(), useWallClock);
 
         public override async ValueTask DisposeAsync()
         {
@@ -282,7 +391,7 @@ public sealed class GameServerTests
                 services.RemoveAll<GameEngine>();
                 services.AddSingleton(new GameEngine(1));
                 services.RemoveAll<TimeProvider>();
-                services.AddSingleton<TimeProvider>(Time);
+                services.AddSingleton<TimeProvider>(useWallClock ? TimeProvider.System : Time);
                 services.AddSingleton<IStartupFilter>(new SetPeer(peer));
             });
         }
@@ -322,11 +431,12 @@ public sealed class GameServerTests
         private readonly CancellationTokenSource cancellation = new();
         private readonly Task loop;
 
-        internal TickPump(GameCoordinator coordinator) => loop = RunAsync(coordinator, cancellation.Token);
+        internal TickPump(GameCoordinator coordinator, bool useWallClock) =>
+            loop = RunAsync(coordinator, useWallClock, cancellation.Token);
 
-        private static async Task RunAsync(GameCoordinator coordinator, CancellationToken cancellation)
+        private static async Task RunAsync(GameCoordinator coordinator, bool useWallClock, CancellationToken cancellation)
         {
-            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(8));
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(useWallClock ? 1000.0 / 60 : 8));
             while (await timer.WaitForNextTickAsync(cancellation))
                 coordinator.Tick();
         }
