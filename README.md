@@ -6,7 +6,8 @@ paddles** for a half-height paddle per player. In Individual paddles, your paddl
 is solid and your teammates appear as ghosts that can still hit the ball.
 Choose with the buttons above the browser arena or press **1** or **2** in the
 terminal. The choice stays locked until the room and its resumable sessions
-are empty. Browser players receive a random nickname. Terminal players use a
+are empty. Browser players use a random nickname or their Discord username
+when [Discord sign-in is enabled](#optional-discord-sign-in). Terminal players use a
 display name of 1–10 ASCII letters or digits. New players
 join the smaller team, with ties decided randomly.
 
@@ -50,7 +51,7 @@ dotnet run --project src/Pongsole.Client -- --server http://localhost:5187 --nam
 Browser and terminal players share the same arena and scores. Use **W/S** or
 **↑/↓** to move, or press and hold **Up/Down** on the browser's touch controls.
 Select **Leave game** in the browser or press **Q/Esc** in the terminal to leave.
-In the browser, **Play again** joins with another randomly selected nickname.
+In the browser, guests get a fresh random nickname each time they join.
 The terminal game uses Spectre.Console for live rendering, with colored team
 paddles and rosters, latency indicators, and brief score and new-ball effects.
 Terminals without Unicode or color still show the game with plain glyphs.
@@ -107,7 +108,8 @@ the link address. The public HTTPS link includes the current code and unlocks
 the browser on opening. Share it privately with the people you want to invite.
 
 The homepage is public while the tunnel runs. Joining the arena requires the
-shared code. The public invite supplies it and joins the browser automatically.
+shared code. The public invite supplies it. If Discord sign-in is enabled for
+that address, first-time players choose **Sign in with Discord** or **Play as guest**.
 Select **Stop** on `cloudflared` to close public access while keeping the
 local game running. Restarting the tunnel creates a new URL. Use the latest invite after the tunnel
 or access code changes.
@@ -184,8 +186,8 @@ a hostname you control, a shared code you choose, and a Cloudflare TURN key.
    docker compose up --build -d
    ```
 
-4. Open an HTTPS invite with the code in the fragment to join under a random
-   nickname. A browser session can keep access across tabs and page reloads
+4. Open an HTTPS invite with the code in the fragment. A browser session
+   can keep access across tabs and page reloads
    while its access cookie is valid. If access expires, open a valid invite
    again. Terminal players use the same HTTPS origin:
 
@@ -209,6 +211,36 @@ scheme. The example trusts only Caddy at `172.30.52.2`. Use an unused
 subnet and update the Compose network and trusted IP together if needed. Clients
 validate the server certificate. The browser page and signaling use the same
 HTTPS origin. Gameplay traffic goes through the TURN relay over UDP.
+
+## Optional Discord sign-in
+
+Register or reuse an application in the [Discord Developer Portal](https://discord.com/developers/applications).
+On its **OAuth2** page, add your exact game URL with `/signin-discord`
+appended as a redirect, such as `https://pong.example.com/signin-discord`.
+Copy the Client ID and Client Secret. Pongsole requests the `identify` scope.
+Bot installation can be skipped.
+
+Set these values in the server environment or in the Compose `.env` file:
+
+| Setting | Value |
+| --- | --- |
+| `Pong__Discord__ClientId` | The application's OAuth2 Client ID |
+| `Pong__Discord__ClientSecret` | The application's OAuth2 Client Secret |
+| `Pong__Discord__Origin` | Optional HTTPS origin to limit where sign-in is offered |
+
+For Aspire, put the same values in the AppHost's user secrets under
+`Parameters:discord-client-id`, `Parameters:discord-client-secret`, and optionally
+`Pong:Discord:Origin`. Use a [named tunnel](#keep-the-same-public-url-across-restarts)
+for a stable public redirect, or register `https://localhost:7275/signin-discord`
+to test in a browser on the same machine. With a Quick Tunnel, register the
+current HTTPS URL shown in Aspire with `/signin-discord` appended and update
+it when the tunnel hostname changes.
+
+Players open their invite as usual. **Sign in with Discord** joins with their
+Discord username. **Play as guest** uses a random nickname. To switch back to
+guest play, choose **Leave game** and then **Sign out**. Private games still
+require an invite. Update terminal clients alongside the server so they can
+read the longer usernames in the roster.
 
 ## Build and test
 

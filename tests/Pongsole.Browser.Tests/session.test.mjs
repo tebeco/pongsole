@@ -48,7 +48,7 @@ class Socket {
   }
 }
 
-function fixture(sockets, access = async () => ({ mode: "loopback", authorized: true })) {
+function fixture(sockets, access = async () => ({ mode: "loopback", authorized: true }), initialName) {
   const time = new FakeClock();
   const changes = [];
   const accessCalls = [];
@@ -59,10 +59,30 @@ function fixture(sockets, access = async () => ({ mode: "loopback", authorized: 
     socket: () => { assert.ok(sockets[index], "Unexpected connection"); return sockets[index++]; },
     changed: () => changes.push(session.state),
     clearMovement: () => { cleared++; },
+    initialName,
     time,
   });
   return { session, time, changes, accessCalls, get cleared() { return cleared; } };
 }
+
+test("an invite offers guest or Discord play and a signed-in player auto-joins", async () => {
+  const guest = new Socket();
+  const invite = fixture([guest], async () => ({ authorized: true, discordAvailable: true }), "Guest");
+  await invite.session.checkAccess("invite");
+  assert.equal(invite.session.state, "ready");
+  assert.equal(invite.session.discordAvailable, true);
+  await invite.session.join("Guest");
+  assert.deepEqual(guest.calls, [["Join", "Guest", null]]);
+
+  const discord = new Socket();
+  const signedIn = fixture([discord], async () => ({
+    authorized: true, discordAvailable: true, discordUsername: "long.discord_username0123456789",
+  }), "Unused");
+  await signedIn.session.checkAccess();
+  assert.equal(signedIn.session.state, "playing");
+  await signedIn.session.leave();
+  assert.equal(signedIn.session.state, "ready");
+});
 
 test("reconciles early and same-tick snapshots and uses the next processed sequence", async () => {
   const socket = new Socket(() => {

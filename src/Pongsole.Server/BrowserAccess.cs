@@ -33,7 +33,7 @@ internal sealed class BrowserAccess
 
     internal void MapEndpoints(WebApplication app, GameAccess game)
     {
-        app.MapGet("/browser/session", async (HttpContext context) =>
+        app.MapGet("/browser/session", async (HttpContext context, DiscordSignIn discord) =>
         {
             var request = context.Request;
             context.Response.Headers.CacheControl = "no-store";
@@ -45,7 +45,15 @@ internal sealed class BrowserAccess
             }
 
             var authorized = game.IsLoopback || await HasTicketAsync(context);
-            return Results.Json(new { mode = game.IsLoopback ? "loopback" : "private", authorized });
+            var discordAvailable = authorized && discord.IsAvailable(request);
+            var player = discordAvailable ? await discord.GetPlayerAsync(context) : null;
+            return Results.Json(new
+            {
+                mode = game.IsLoopback ? "loopback" : "private",
+                authorized,
+                discordAvailable,
+                discordUsername = player?.Username
+            });
         });
 
         app.MapPost("/browser/session", async (HttpContext context) =>

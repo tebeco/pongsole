@@ -22,17 +22,21 @@ export class GameSession {
   lastSequence = 0;
   choosingMode = false;
   modeError = "";
+  discordAvailable = false;
+  discordUsername = null;
+  #initialName;
   #attempt;
   #generation = 0;
   #retry;
   #retryIndex = 0;
   #stopping = Promise.resolve();
 
-  constructor({ access, socket, changed, clearMovement, time = clock }) {
+  constructor({ access, socket, changed, clearMovement, initialName, time = clock }) {
     this.access = access;
     this.socket = socket;
     this.changed = changed;
     this.clearMovement = clearMovement;
+    this.#initialName = initialName;
     this.time = time;
   }
 
@@ -82,18 +86,24 @@ export class GameSession {
       }
       const grant = await this.access(next.abort.signal);
       if (!this.#isCurrent(next)) return;
+      this.discordAvailable = grant.discordAvailable === true;
+      this.discordUsername = grant.discordUsername ?? null;
       if (!grant.authorized) {
         this.#show("access", inviteRequired);
-      } else if (this.name) {
-        await this.#connect(next);
       } else {
-        this.#show("ready");
+        if (this.#initialName && (!this.discordAvailable || this.discordUsername))
+          this.name = this.#initialName;
+        this.#initialName = undefined;
+        if (this.name)
+          await this.#connect(next);
+        else
+          this.#show("ready");
       }
     } catch (error) {
       if (!this.#isCurrent(next)) return;
       if (error instanceof AccessError && [401, 403].includes(error.status)) {
         this.#show("access", inviteRequired);
-      } else if (this.name) {
+      } else if (this.name || this.#initialName) {
         this.#schedule(next, "Connection unavailable. Reconnecting…");
       } else {
         this.#show("unavailable", "Could not check access. Try again.");
@@ -106,6 +116,7 @@ export class GameSession {
       this.#show("ready", nameRule);
       return;
     }
+    this.#initialName = undefined;
     this.name = name;
     this.#retryIndex = 0;
     return this.checkAccess(code);

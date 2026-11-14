@@ -8,6 +8,9 @@ services:
       Pong__Turn__KeyId: ${CLOUDFLARE_TURN_KEY_ID:?Set CLOUDFLARE_TURN_KEY_ID}
       Pong__Turn__ApiToken: ${CLOUDFLARE_TURN_API_TOKEN:?Set CLOUDFLARE_TURN_API_TOKEN}
       Pong__KnownProxies__0: 172.30.52.2
+      Pong__Discord__Origin: ${Pong__Discord__Origin:-}
+      Pong__Discord__ClientId: ${Pong__Discord__ClientId:-}
+      Pong__Discord__ClientSecret: ${Pong__Discord__ClientSecret:-}
     networks:
       pongsole:
         ipv4_address: 172.30.52.3

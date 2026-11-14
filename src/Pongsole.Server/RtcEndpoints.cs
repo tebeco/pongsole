@@ -16,10 +16,11 @@ internal static class RtcEndpoints
     }
 
     private static async Task<IResult> CreateAsync(HttpContext context, RtcSessions sessions,
-        ITurnCredentialProvider credentials, IServiceProvider services)
+        ITurnCredentialProvider credentials, DiscordSignIn discord, IServiceProvider services)
     {
         context.Response.Headers.CacheControl = "no-store";
-        var reservation = sessions.Reserve(context.Connection.RemoteIpAddress);
+        var player = context.Request.Headers.ContainsKey("Origin") ? await discord.GetPlayerAsync(context) : null;
+        var reservation = sessions.Reserve(context.Connection.RemoteIpAddress, player);
         if (reservation.Error is { } rejection)
             return Error(rejection, StatusCodes.Status429TooManyRequests);
 

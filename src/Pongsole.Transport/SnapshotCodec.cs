@@ -46,7 +46,7 @@ public static class SnapshotCodec
         Span<byte> uuid = stackalloc byte[16];
         foreach (var player in snapshot.Players)
         {
-            Check(PlayerName.IsValid(player.DisplayName));
+            Check(PlayerName.IsValidDisplayName(player.DisplayName));
             player.PlayerId.TryWriteBytes(uuid, bigEndian: true, out _);
             writer.Write(uuid);
             writer.Write((byte)player.DisplayName.Length);
@@ -135,7 +135,7 @@ public static class SnapshotCodec
             {
                 var id = new Guid(reader.Take(16), bigEndian: true);
                 var nameLength = reader.Byte();
-                Check(id != Guid.Empty && playerIds.Add(id) && nameLength is >= 1 and <= 10);
+                Check(id != Guid.Empty && playerIds.Add(id) && nameLength is >= 1 and <= PlayerName.MaximumDisplayLength);
                 var name = Encoding.ASCII.GetString(reader.Take(nameLength));
                 var team = (Team)reader.Byte();
                 var sequence = reader.SafeInteger();
@@ -143,7 +143,7 @@ public static class SnapshotCodec
                 var upTick = reader.OptionalTick(tick);
                 var downTick = reader.OptionalTick(tick);
                 var latency = reader.UInt16();
-                Check(PlayerName.IsValid(name) && team is Team.Left or Team.Right && count <= 100 &&
+                Check(PlayerName.IsValidDisplayName(name) && team is Team.Left or Team.Right && count <= 100 &&
                     (latency <= 2000 || latency == ushort.MaxValue));
                 players.Add(new PlayerState(id, name, team, sequence, count, upTick, downTick,
                     latency == ushort.MaxValue ? null : latency));

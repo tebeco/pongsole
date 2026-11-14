@@ -148,7 +148,10 @@ internal static class GameRenderer
             var player = members[index];
             var latency = player.LatencyMilliseconds is int ms
                 ? FormattableString.Invariant($"({ms}ms)") : unicode ? "(—)" : "(-)";
-            var name = player.Name + " ";
+            var shortName = player.Name.Length > PlayerName.MaximumLength
+                ? player.Name[..(PlayerName.MaximumLength - 1)] + (unicode ? "…" : "~")
+                : player.Name;
+            var name = shortName + " ";
             var latencyStyle = player.LatencyMilliseconds switch
             {
                 null => Dim,

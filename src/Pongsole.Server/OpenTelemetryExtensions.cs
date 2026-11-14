@@ -22,9 +22,10 @@ internal static class OpenTelemetryExtensions
             .WithTracing(tracing => tracing
                 .AddAspNetCoreInstrumentation(options => options.Filter = context =>
                     context.Request.Path != "/health" && context.Request.Path != "/alive"
-                    && !context.Request.Path.StartsWithSegments("/rtc"))
+                    && !context.Request.Path.StartsWithSegments("/rtc")
+                    && context.Request.Path != DiscordSignIn.CallbackPath)
                 .AddHttpClientInstrumentation(options => options.FilterHttpRequestMessage =
-                    request => request.RequestUri?.Host != CloudflareTurnCredentialProvider.ApiHost));
+                    request => request.RequestUri?.Host is not (CloudflareTurnCredentialProvider.ApiHost or DiscordSignIn.ApiHost)));
 
         if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
         {
