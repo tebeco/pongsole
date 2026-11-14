@@ -17,7 +17,7 @@ internal sealed class RtcSessions(GameCoordinator coordinator, TimeProvider time
     private readonly Dictionary<IPAddress, Queue<long>> starts = [];
     private bool stopping;
 
-    internal (RtcConnection? Connection, string? Error) Reserve(IPAddress? address)
+    internal (RtcConnection? Connection, string? Error) Reserve(IPAddress? address, DiscordPlayer? player = null)
     {
         lock (gate)
         {
@@ -54,7 +54,7 @@ internal sealed class RtcSessions(GameCoordinator coordinator, TimeProvider time
             GameCoordinator.ConnectionLease lease;
             try
             {
-                lease = coordinator.Admit(id, NewEpoch());
+                lease = coordinator.Admit(id, NewEpoch(), player);
             }
             catch (HubException error)
             {

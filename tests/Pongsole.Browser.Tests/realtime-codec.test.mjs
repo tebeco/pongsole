@@ -55,6 +55,19 @@ test("decodes the shared snapshot vector and rejects malformed data", () => {
   assert.equal(readSnapshot(nonfinite), null);
 });
 
+test("decodes a full Discord username in the roster", () => {
+  const payload = Buffer.from(vectors.snapshotHex, "hex");
+  const previous = "Player0001";
+  const start = payload.indexOf(previous);
+  assert.ok(start > 0);
+  const username = "long.discord_username0123456789";
+  const withDiscordName = Buffer.concat([
+    payload.subarray(0, start - 1), Buffer.of(username.length), Buffer.from(username),
+    payload.subarray(start + previous.length),
+  ]);
+  assert.equal(readSnapshot(withDiscordName).players[0].displayName, username);
+});
+
 test("reassembly handles reorder, duplicate, conflict, expiry and eviction", () => {
   const payload = bytes(vectors.snapshotHex);
   const reader = new SnapshotReassembly(7);

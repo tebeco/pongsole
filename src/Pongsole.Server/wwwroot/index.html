@@ -17,6 +17,12 @@
     <section class="game" aria-label="Pong arena">
       <header class="game-controls" aria-label="Game controls">
         <p class="team-label" id="team-label" hidden></p>
+        <form id="discord-login" action="/discord/login" method="post" hidden>
+          <button type="submit">Sign in with Discord</button>
+        </form>
+        <form id="discord-logout" action="/discord/logout" method="post" hidden>
+          <button type="submit">Sign out</button>
+        </form>
         <button id="play-again" type="button" hidden>Play again</button>
         <button id="retry" type="button" hidden>Try again</button>
         <div id="play-controls" hidden>
@@ -28,6 +34,7 @@
         </div>
         <button id="leave" type="button" hidden>Leave game</button>
         <p id="message" role="status" aria-live="polite"></p>
+        <p id="discord-message" role="status" hidden>Discord sign-in failed. Try again or play as a guest.</p>
       </header>
       <div class="game-mode" id="game-mode" hidden>
         <p id="mode-status" role="status"></p>

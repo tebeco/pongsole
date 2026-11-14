@@ -1,5 +1,3 @@
-import { validName } from "./roster.mjs";
-
 export const headerSize = 28;
 export const chunkSize = 972;
 export const maxPayloadSize = 8192;
@@ -184,7 +182,7 @@ export function readSnapshot(bytes) {
       const playerId = uuid();
       check(!roster.has(playerId));
       const nameLength = byte();
-      check(nameLength >= 1 && nameLength <= 10);
+      check(nameLength >= 1 && nameLength <= 32);
       const nameStart = take(nameLength);
       const displayName = String.fromCharCode(...bytes.subarray(nameStart, nameStart + nameLength));
       const team = teams[byte()];
@@ -193,7 +191,7 @@ export function readSnapshot(bytes) {
       const lastUpTick = optionalTick();
       const lastDownTick = optionalTick();
       const latency = short();
-      check(validName(displayName) && team !== undefined && recentPushCount <= 100 &&
+      check(!/[^A-Za-z0-9_.]/u.test(displayName) && team !== undefined && recentPushCount <= 100 &&
         (latency <= 2000 || latency === 65535));
       roster.set(playerId, team);
       return { playerId, displayName, team, lastProcessedSequence, recentPushCount, lastUpTick, lastDownTick,

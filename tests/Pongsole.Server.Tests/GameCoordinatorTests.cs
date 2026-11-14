@@ -13,6 +13,28 @@ public sealed class GameCoordinatorTests
     private GameCoordinator NewCoordinator() => new(engine, time, new Random(2));
 
     [Fact]
+    public async Task DiscordIdentitySuppliesTheNameAndOwnsItsResumeToken()
+    {
+        using var coordinator = NewCoordinator();
+        const string username = "long.discord_username0123456789";
+        var first = coordinator.Admit("first", 1, new DiscordPlayer("123", username));
+        var joined = await Complete(coordinator, coordinator.JoinAsync(first, "Ignored", null));
+        var payload = SnapshotCodec.Write(joined.Snapshot);
+        Assert.True(SnapshotCodec.TryRead(payload, out var decoded));
+        Assert.Equal(username, Assert.Single(decoded!.Players).DisplayName);
+        await Complete(coordinator, coordinator.DisconnectAsync(first));
+
+        var guest = coordinator.Admit("guest", 2);
+        await Error("INVALID_RESUME_TOKEN", () => Complete(coordinator,
+            coordinator.JoinAsync(guest, "", joined.ResumeToken)));
+
+        var returning = coordinator.Admit("returning", 3, new DiscordPlayer("123", "renamed.user"));
+        var resumed = await Complete(coordinator, coordinator.JoinAsync(returning, "Ignored", joined.ResumeToken));
+        Assert.Equal(joined.PlayerId, resumed.PlayerId);
+        Assert.Equal("renamed.user", Assert.Single(resumed.Snapshot.Players).DisplayName);
+    }
+
+    [Fact]
     public async Task ModeChoiceRequiresCurrentOldestPlayerAndFirstValidRequestLocksMode()
     {
         using var coordinator = NewCoordinator();

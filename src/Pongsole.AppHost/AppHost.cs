@@ -36,6 +36,14 @@ if (builder.ExecutionContext.IsRunMode)
             server.WithEnvironment(key, builder.AddParameter(name, secret: true));
     }
 
+    var discordOrigin = builder.Configuration["Pong:Discord:Origin"];
+    if (!string.IsNullOrWhiteSpace(discordOrigin))
+        server.WithEnvironment("Pong__Discord__Origin", discordOrigin);
+    if (!string.IsNullOrWhiteSpace(builder.Configuration["Parameters:discord-client-id"]))
+        server.WithEnvironment("Pong__Discord__ClientId", builder.AddParameter("discord-client-id"));
+    if (!string.IsNullOrWhiteSpace(builder.Configuration["Parameters:discord-client-secret"]))
+        server.WithEnvironment("Pong__Discord__ClientSecret", builder.AddParameter("discord-client-secret", secret: true));
+
     var tunnel = builder.AddProject<Projects.Pongsole_Tunnel>("cloudflared")
         .WithHttpEndpoint(name: "http")
         .WithUrlForEndpoint("http", url =>

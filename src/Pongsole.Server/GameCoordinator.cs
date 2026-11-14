@@ -40,7 +40,7 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
         return EnqueueLifecycleAsync(new SelectModeCommand(lease, requestedMode, completion), completion.Task);
     }
 
-    internal ConnectionLease Admit(string connectionId, long epoch = 0)
+    internal ConnectionLease Admit(string connectionId, long epoch = 0, DiscordPlayer? discord = null)
     {
         lock (gate)
         {
@@ -51,7 +51,7 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
             if (connections.Count >= ConnectionLimit)
                 throw GameErrors.CapacityReached();
 
-            var lease = new ConnectionLease(connectionId, epoch);
+            var lease = new ConnectionLease(connectionId, epoch, discord);
             connections.Add(connectionId, lease);
             return lease;
         }
@@ -452,21 +452,25 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
         {
             if (!sessions.TryGetValue(resumeToken, out session!))
                 throw tombstones.Contains(resumeToken) ? GameErrors.ExpiredResumeToken() : GameErrors.InvalidResumeToken();
+            if (session.DiscordId != lease.Discord?.Id)
+                throw GameErrors.InvalidResumeToken();
             if (session.Lease is not null)
                 throw GameErrors.SessionAlreadyConnected();
 
+            if (lease.Discord is { } discord)
+                session.DisplayName = discord.Username;
             RemoveRetained(session);
         }
         else
         {
-            if (!PlayerName.IsValid(displayName))
+            if (lease.Discord is null && !PlayerName.IsValid(displayName))
                 throw GameErrors.InvalidName();
 
             var team = leftCount == rightCount
                 ? (Team)teamRandom.Next(2)
                 : leftCount < rightCount ? Team.Left : Team.Right;
-            session = new Session(Guid.NewGuid(), displayName, team,
-                Convert.ToHexString(RandomNumberGenerator.GetBytes(32)), ++nextJoinOrdinal);
+            session = new Session(Guid.NewGuid(), lease.Discord?.Username ?? displayName, team,
+                Convert.ToHexString(RandomNumberGenerator.GetBytes(32)), ++nextJoinOrdinal, lease.Discord?.Id);
             sessions.Add(session.Token, session);
         }
 
@@ -615,10 +619,11 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
 
     private static TaskCompletionSource<T> NewCompletion<T>() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    internal sealed class ConnectionLease(string connectionId, long epoch)
+    internal sealed class ConnectionLease(string connectionId, long epoch, DiscordPlayer? discord)
     {
         internal string ConnectionId { get; } = connectionId;
         internal long Epoch { get; } = epoch;
+        internal DiscordPlayer? Discord { get; } = discord;
         internal Session? Session { get; set; }
         internal HeldInput Held { get; } = new();
         internal RealtimeInput Realtime { get; } = new();
@@ -659,10 +664,12 @@ internal sealed class GameCoordinator(GameEngine engine, TimeProvider time, Rand
         }
     }
 
-    internal sealed class Session(Guid playerId, string displayName, Team team, string token, long joinOrdinal)
+    internal sealed class Session(Guid playerId, string displayName, Team team, string token, long joinOrdinal,
+        string? discordId)
     {
         internal Guid PlayerId { get; } = playerId;
-        internal string DisplayName { get; } = displayName;
+        internal string DisplayName { get; set; } = displayName;
+        internal string? DiscordId { get; } = discordId;
         internal Team Team { get; } = team;
         internal string Token { get; } = token;
         internal long JoinOrdinal { get; } = joinOrdinal;

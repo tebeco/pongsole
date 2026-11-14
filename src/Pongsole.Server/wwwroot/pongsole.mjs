@@ -11,6 +11,15 @@ const byId = id => document.getElementById(id);
 const arena = byId("arena");
 const connection = byId("connection");
 const playAgain = byId("play-again");
+const discordLogin = byId("discord-login");
+const discordLogout = byId("discord-logout");
+const discordMessage = byId("discord-message");
+const page = new URL(location.href);
+if (page.searchParams.get("discord") === "failed") {
+  discordMessage.hidden = false;
+  page.searchParams.delete("discord");
+  window.history.replaceState(window.history.state, "", page);
+}
 const retry = byId("retry");
 const leave = byId("leave");
 const message = byId("message");
@@ -43,6 +52,7 @@ const session = new GameSession({
   socket: gameSocket,
   changed: show,
   clearMovement: disconnected => movement.clear(disconnected),
+  initialName: pickNickname(),
 });
 
 const movement = new Movement({
@@ -64,6 +74,10 @@ function show() {
   connection.dataset.state = state;
   message.textContent = detail;
   playAgain.hidden = state !== "ready";
+  playAgain.textContent = session.discordUsername ? `Play as ${session.discordUsername}` :
+    session.discordAvailable ? "Play as guest" : "Play again";
+  discordLogin.hidden = state !== "ready" || !session.discordAvailable || !!session.discordUsername;
+  discordLogout.hidden = state !== "ready" || !session.discordUsername;
   retry.hidden = state !== "unavailable";
   leave.hidden = !["connecting", "reconnecting", "playing", "terminal"].includes(state);
   byId("play-controls").hidden = !player;
@@ -96,7 +110,8 @@ function show() {
     phase === "playing" ? "Playing" : "Ready";
   byId("team-label").hidden = !player;
   byId("team-label").dataset.team = player?.team ?? "";
-  byId("team-label").textContent = player ? `${session.name} · Team ${player.team === "left" ? "Left" : "Right"}` : "";
+  const playerName = snapshot?.players.find(candidate => candidate.playerId === player?.playerId)?.displayName;
+  byId("team-label").textContent = player ? `${playerName ?? session.name} · Team ${player.team === "left" ? "Left" : "Right"}` : "";
   const announcement = [labels[state], phase === "waiting" ? "Waiting for both teams" :
     phase === "serving" ? "Serving" : phase === "playing" ? "Playing" : "",
     snapshot ? `Left ${left}, Right ${right}. ${players} ${players === 1 ? "player" : "players"}.` : "",
@@ -107,7 +122,7 @@ function show() {
   }
 
   if (previousState !== state) {
-    if (state === "ready") playAgain.focus();
+    if (state === "ready") (discordLogin.hidden ? playAgain : discordLogin.querySelector("button")).focus();
     if (state === "playing") leave.focus();
     if (state === "terminal") leave.focus();
     previousState = state;
@@ -134,11 +149,14 @@ for (const button of modeButtons) {
   button.addEventListener("click", () => { void session.selectMode(button.dataset.mode); });
 }
 
-playAgain.addEventListener("click", () => { void session.join(pickNickname()); });
+playAgain.addEventListener("click", () => {
+  discordMessage.hidden = true;
+  void session.join(pickNickname());
+});
 retry.addEventListener("click", () => { void session.checkAccess(); });
 leave.addEventListener("click", () => { void session.leave(); });
 
 const resize = new ResizeObserver(queueFrame);
 resize.observe(arena);
 reduceMotion.addEventListener("change", queueFrame);
-void session.join(pickNickname(), initialInviteCode(location));
+void session.checkAccess(initialInviteCode(location));

@@ -1,5 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.AspNetCore.Authentication.OAuth;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
@@ -9,6 +12,7 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -23,6 +27,83 @@ public sealed class BrowserAccessTests
     private const string PrivateOrigin = "https://pong.example";
     private const string Code = "test-browser-code";
     private const string CookieName = "__Host-PongsoleAccess";
+    private const string DiscordCookieName = "__Host-PongsoleDiscord";
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(PrivateOrigin)]
+    public async Task DiscordUsesCorrelatedCodeExchangeAndKeepsTheInviteSeparate(string? discordOrigin)
+    {
+        const string username = "long.discord_username0123456789";
+        using var discord = new DiscordBackchannel(username);
+        await using var app = new BrowserServer(discord: discord, discordOrigin: discordOrigin);
+        using var client = app.Client(PrivateOrigin);
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var withoutTicket = new HttpRequestMessage(HttpMethod.Post, "/discord/login");
+        withoutTicket.Headers.Add("Origin", PrivateOrigin);
+        using var noInvite = await client.SendAsync(withoutTicket, cancellationToken);
+        AssertStatus(noInvite, HttpStatusCode.Forbidden);
+        var invite = Cookie(await SignIn(client, PrivateOrigin));
+        client.DefaultRequestHeaders.Add("Origin", PrivateOrigin);
+        client.DefaultRequestHeaders.Add("Cookie", invite);
+        using var challenge = await client.PostAsync("/discord/login", null, cancellationToken);
+        AssertStatus(challenge, HttpStatusCode.Redirect);
+        var authorization = Assert.IsType<Uri>(challenge.Headers.Location);
+        var query = QueryHelpers.ParseQuery(authorization.Query);
+        Assert.Equal("https://discord.com/oauth2/authorize", authorization.GetLeftPart(UriPartial.Path));
+        Assert.Equal("identify", query["scope"].ToString());
+        Assert.Equal("S256", query["code_challenge_method"].ToString());
+        Assert.Equal(PrivateOrigin + "/signin-discord", query["redirect_uri"].ToString());
+        var correlation = SetCookieHeaderValue.Parse(Assert.Single(challenge.Headers.GetValues("Set-Cookie")));
+        Assert.True(correlation.HttpOnly);
+        Assert.True(correlation.Secure);
+        var callbackPath = QueryHelpers.AddQueryString("/signin-discord", new Dictionary<string, string?>
+        {
+            ["code"] = "discord-code",
+            ["state"] = query["state"].ToString(),
+            ["iss"] = "https://discord.com"
+        });
+
+        using var uncorrelated = await client.GetAsync(callbackPath, cancellationToken);
+        Assert.Equal("/?discord=failed", uncorrelated.Headers.Location?.OriginalString);
+        Assert.Equal(0, discord.Calls);
+        using var callback = new HttpRequestMessage(HttpMethod.Get, callbackPath);
+        callback.Headers.Add("Cookie", Cookie(correlation));
+        using var signedIn = await client.SendAsync(callback, cancellationToken);
+        AssertStatus(signedIn, HttpStatusCode.Redirect);
+        Assert.Equal("/", signedIn.Headers.Location?.OriginalString);
+        Assert.Equal(2, discord.Calls);
+        Assert.Equal(query["code_challenge"].ToString(), WebEncoders.Base64UrlEncode(
+            SHA256.HashData(Encoding.ASCII.GetBytes(Assert.IsType<string>(discord.Verifier)))));
+        var identity = signedIn.Headers.GetValues("Set-Cookie").Select(value => SetCookieHeaderValue.Parse(value))
+            .Single(cookie => cookie.Name == DiscordCookieName);
+        Assert.True(identity.HttpOnly);
+        Assert.True(identity.Secure);
+        Assert.Equal(SameSiteMode.Strict, identity.SameSite);
+
+        using var identityOnly = new HttpRequestMessage(HttpMethod.Get, "/browser/session");
+        identityOnly.Headers.Add("Cookie", Cookie(identity));
+        using var rejected = await client.SendAsync(identityOnly, cancellationToken);
+        var withoutInvite = await rejected.Content.ReadFromJsonAsync<SessionStatus>(cancellationToken);
+        Assert.NotNull(withoutInvite);
+        Assert.False(withoutInvite.Authorized);
+        Assert.Null(withoutInvite.DiscordUsername);
+
+        client.DefaultRequestHeaders.Remove("Cookie");
+        client.DefaultRequestHeaders.Add("Cookie", $"{invite}; {Cookie(identity)}");
+        var session = await client.GetFromJsonAsync<SessionStatus>("/browser/session", cancellationToken);
+        Assert.NotNull(session);
+        Assert.True(session.Authorized);
+        Assert.True(session.DiscordAvailable);
+        Assert.Equal(username, session.DiscordUsername);
+
+        using var signedOut = await client.PostAsync("/discord/logout", null, cancellationToken);
+        AssertStatus(signedOut, HttpStatusCode.Redirect);
+        var cleared = SetCookieHeaderValue.Parse(Assert.Single(signedOut.Headers.GetValues("Set-Cookie")));
+        Assert.Equal(DiscordCookieName, cleared.Name.ToString());
+        Assert.Equal("", cleared.Value.ToString());
+        Assert.True(cleared.Expires < DateTimeOffset.UtcNow);
+    }
 
     [Fact]
     public async Task PrivateExchangeCreatesOnlySessionCookieAndReportsAuthorization()
@@ -354,7 +435,39 @@ public sealed class BrowserAccessTests
             Assert.True(request.Headers.TryAddWithoutValidation(name, value));
     }
 
-    private sealed record SessionStatus(string Mode, bool Authorized);
+    private sealed record SessionStatus(string Mode, bool Authorized, bool DiscordAvailable = false,
+        string? DiscordUsername = null);
+
+    private sealed class DiscordBackchannel(string username) : HttpMessageHandler
+    {
+        internal int Calls { get; private set; }
+        internal string? Verifier { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            Calls++;
+            Assert.StartsWith("DiscordBot (https://github.com/tebeco/pongsole, ", request.Headers.UserAgent.ToString());
+            if (request.RequestUri?.AbsoluteUri == "https://discord.com/api/oauth2/token")
+            {
+                Assert.Equal(HttpMethod.Post, request.Method);
+                var form = QueryHelpers.ParseQuery(await request.Content!.ReadAsStringAsync(token));
+                Assert.Equal("discord-code", form["code"].ToString());
+                Assert.Equal(PrivateOrigin + "/signin-discord", form["redirect_uri"].ToString());
+                Verifier = form["code_verifier"].ToString();
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(new { access_token = "test-access-token" })
+                };
+            }
+
+            Assert.Equal("https://discord.com/api/v10/users/@me", request.RequestUri?.AbsoluteUri);
+            Assert.Equal("Bearer test-access-token", request.Headers.Authorization?.ToString());
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new { id = "123456789", username })
+            };
+        }
+    }
 
     private sealed class BrowserServer : WebApplicationFactory<Program>
     {
@@ -363,15 +476,20 @@ public sealed class BrowserAccessTests
         private readonly string? proxy;
         private readonly IDataProtectionProvider keys;
         private readonly bool kestrel;
+        private readonly HttpMessageHandler? discord;
+        private readonly string? discordOrigin;
 
         internal BrowserServer(string mode = "Private", string peer = "127.0.0.1", string? proxy = null,
-            IDataProtectionProvider? keys = null, bool kestrel = false)
+            IDataProtectionProvider? keys = null, bool kestrel = false, HttpMessageHandler? discord = null,
+            string? discordOrigin = null)
         {
             this.mode = mode;
             this.peer = peer;
             this.proxy = proxy;
             this.keys = keys ?? new EphemeralDataProtectionProvider();
             this.kestrel = kestrel;
+            this.discord = discord;
+            this.discordOrigin = discordOrigin;
             if (kestrel)
                 UseKestrel(0);
         }
@@ -409,6 +527,17 @@ public sealed class BrowserAccessTests
                 services.RemoveAll<IDataProtectionProvider>();
                 services.AddSingleton(keys);
                 services.AddLegacyGameTransport();
+                if (discord is not null)
+                {
+                    DiscordSignIn.AddServices(services, new ConfigurationBuilder().AddInMemoryCollection(
+                        new Dictionary<string, string?>
+                        {
+                            ["Pong:Discord:Origin"] = discordOrigin,
+                            ["Pong:Discord:ClientId"] = "test-client",
+                            ["Pong:Discord:ClientSecret"] = "test-secret"
+                        }).Build());
+                    services.Configure<OAuthOptions>("Discord", options => options.Backchannel = new HttpClient(discord));
+                }
             });
         }
 

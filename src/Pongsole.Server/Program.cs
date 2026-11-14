@@ -15,6 +15,7 @@ OpenTelemetryExtensions.AddOpenTelemetry(builder);
 builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
 builder.Services.AddSingleton(TimeProvider.System);
 BrowserAccess.AddServices(builder.Services);
+DiscordSignIn.AddServices(builder.Services, builder.Configuration);
 builder.Services.AddSingleton(builder.Configuration.GetSection("Pong:Turn").Get<TurnOptions>() ?? new());
 builder.Services.AddHttpClient<ITurnCredentialProvider, CloudflareTurnCredentialProvider>()
     .RemoveAllLoggers()
@@ -30,7 +31,9 @@ builder.Services.AddHostedService(services => services.GetRequiredService<RtcSes
 
 var app = builder.Build();
 var access = new GameAccess(app.Configuration);
+var discord = app.Services.GetRequiredService<DiscordSignIn>();
 access.Apply(app);
+discord.UseCallbackGuard(app);
 app.UseAuthentication();
 app.UseHomepage();
 app.UseStaticFiles(new StaticFileOptions
@@ -43,6 +46,7 @@ app.UseStaticFiles(new StaticFileOptions
     }
 });
 app.Services.GetRequiredService<BrowserAccess>().MapEndpoints(app, access);
+discord.MapEndpoints(app, access);
 RtcEndpoints.Map(app);
 app.MapHealthCheckEndpoints();
 app.Run();
