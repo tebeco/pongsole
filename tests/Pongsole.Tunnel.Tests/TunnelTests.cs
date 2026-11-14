@@ -157,6 +157,37 @@ public sealed class TunnelTests
     }
 
     [Fact]
+    public void NamedTunnelPassesTheTokenOnlyInTheChildEnvironment()
+    {
+        var config = Path.GetFullPath("some folder/config.yml");
+        var start = CloudflaredLauncher.CreateStartInfo("cloudflared", config, new Uri("http://localhost:5187"), "fixture-token");
+        Assert.Equal(["tunnel", "--config", config, "--no-autoupdate", "--loglevel", "info", "run"], start.ArgumentList);
+        Assert.Equal("fixture-token", start.Environment["TUNNEL_TOKEN"]);
+    }
+
+    [Fact]
+    public async Task NamedTunnelPublishesConfiguredAddressAfterConnectingAndLoadingIngress()
+    {
+        using var lifetime = new TestLifetime();
+        var child = new TestChild();
+        var address = new Uri("https://pong.example.com/");
+        using var service = new TunnelService(new TestLauncher(child), new Uri("http://localhost:5187"), TimeProvider.System,
+            lifetime, new TunnelExitStatus(), NullLogger<TunnelService>.Instance, new NamedTunnel(address, "fixture-token"));
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        await service.StartAsync(timeout.Token);
+        Assert.Null(service.PublicAddress);
+        await child.Errors.Writer.WriteAsync("2026-11-14T09:00:00Z INF Registered tunnel connection connIndex=0", timeout.Token);
+        await child.Errors.Writer.WriteAsync("2026-11-14T09:00:01Z INF Updated to new configuration config={}", timeout.Token);
+        while (service.PublicAddress is null)
+            await Task.Delay(10, timeout.Token);
+        Assert.Equal(address, service.PublicAddress);
+
+        await service.StopAsync(timeout.Token);
+        Assert.Null(service.PublicAddress);
+    }
+
+    [Fact]
     public async Task DrainDropsOversizedLineAndPreservesFollowingBanner()
     {
         var seen = new List<string>();

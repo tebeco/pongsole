@@ -3,6 +3,7 @@ using Pongsole.Tunnel;
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(_ => TunnelAddress.ParseOrigin(builder.Configuration["Tunnel:Origin"]));
+builder.Services.AddSingleton(NamedTunnel.FromConfiguration(builder.Configuration));
 builder.Services.AddSingleton(_ => new HttpClient());
 builder.Services.AddSingleton<CloudflaredInstaller>();
 builder.Services.AddSingleton<ITunnelLauncher, CloudflaredLauncher>();

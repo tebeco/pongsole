@@ -120,6 +120,27 @@ account or domain, support up to 200 in-flight requests, and do not support
 Server-Sent Events. The tunnel serves the game page and HTTPS signaling.
 Gameplay uses WebRTC over UDP through Cloudflare TURN.
 
+### Keep the same public URL across restarts
+
+Create a remotely managed Cloudflare Tunnel and add a published application
+hostname on a domain you manage in Cloudflare, such as `pong.example.com`.
+Set the service type to **HTTP** and the service URL to `localhost:5187`
+(Pongsole's default Aspire HTTP port). Keep the public Host header by leaving
+the **HTTP Host Header** override empty.
+See [Cloudflare Tunnel setup](https://developers.cloudflare.com/tunnel/get-started/).
+
+Using the connector token from Cloudflare, set both Aspire parameters from
+the repository root:
+
+```powershell
+dotnet user-secrets set "Parameters:cloudflare-tunnel-hostname" "pong.example.com" --project src/Pongsole.AppHost
+dotnet user-secrets set "Parameters:cloudflare-tunnel-token" "<TUNNEL_TOKEN>" --project src/Pongsole.AppHost
+```
+
+Restart Aspire. **Play over Internet** uses the configured hostname with the
+current invite code. Register `https://pong.example.com/signin-discord` once
+in Discord. With both parameters unset, Aspire uses a Quick Tunnel.
+
 ### Cloudflare TURN configuration
 
 Create a TURN key in **Realtime → TURN** in the Cloudflare dashboard. For the
