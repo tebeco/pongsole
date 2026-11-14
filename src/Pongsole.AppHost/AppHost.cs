@@ -47,9 +47,24 @@ if (builder.ExecutionContext.IsRunMode)
         .WithEnvironment("Tunnel__Origin", server.GetEndpoint("http"))
         .WaitFor(server);
 
+    var publicHostname = builder.Configuration["Parameters:cloudflare-tunnel-hostname"];
+    var hasTunnelToken = !string.IsNullOrWhiteSpace(builder.Configuration["Parameters:cloudflare-tunnel-token"]);
+    if (!string.IsNullOrWhiteSpace(publicHostname) || hasTunnelToken)
+    {
+        if (!hasTunnelToken || Uri.CheckHostName(publicHostname) != UriHostNameType.Dns ||
+            !publicHostname!.Contains('.') || publicHostname.EndsWith(".trycloudflare.com", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Set both cloudflare-tunnel-hostname and cloudflare-tunnel-token parameters for a named tunnel.");
+        }
+
+        tunnel.WithEnvironment("Tunnel__PublicHostname", builder.AddParameter("cloudflare-tunnel-hostname"))
+            .WithEnvironment("Tunnel__Token", builder.AddParameter("cloudflare-tunnel-token", secret: true));
+    }
+
     var tunnelEndpoint = tunnel.GetEndpoint("http");
     builder.Services.AddHostedService(services => new TunnelInvitePublisher(
-        services.GetRequiredService<ResourceNotificationService>(), tunnel.Resource, tunnelEndpoint, gameCode.Resource));
+        services.GetRequiredService<ResourceNotificationService>(), tunnel.Resource, tunnelEndpoint, gameCode.Resource,
+        string.IsNullOrWhiteSpace(publicHostname) ? null : new UriBuilder(Uri.UriSchemeHttps, publicHostname).Uri));
 
     var serverEndpoint = server.GetEndpoint("https");
     foreach (var (resourceName, playerName) in new[] { ("terminal-1", "Terminal1"), ("terminal-2", "Terminal2") })

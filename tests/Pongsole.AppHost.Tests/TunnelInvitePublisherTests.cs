@@ -33,6 +33,17 @@ public sealed class TunnelInvitePublisherTests
     public void RejectsNonTunnelRoots(string address) => Assert.Null(TunnelInvitePublisher.ParsePublicAddress(address));
 
     [Theory]
+    [InlineData("https://pong.example.com/", true)]
+    [InlineData("https://other.example.com/", false)]
+    [InlineData("https://one.trycloudflare.com/", false)]
+    [InlineData("https://pong.example.com/?redirect=elsewhere", false)]
+    public void PublishesOnlyTheConfiguredNamedTunnelAddress(string redirect, bool accepted)
+    {
+        var configured = new Uri("https://pong.example.com/");
+        Assert.Equal(accepted ? configured : null, TunnelInvitePublisher.ParsePublicAddress(redirect, configured));
+    }
+
+    [Theory]
     [InlineData("http://localhost:1234/", true)]
     [InlineData("http://127.0.0.1:1234/", true)]
     [InlineData("http://[::1]:1234/", true)]

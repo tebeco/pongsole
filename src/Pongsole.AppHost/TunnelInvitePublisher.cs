@@ -10,7 +10,8 @@ internal sealed partial class TunnelInvitePublisher(
     ResourceNotificationService notifications,
     IResource resource,
     EndpointReference endpoint,
-    ParameterResource gameCode) : BackgroundService
+    ParameterResource gameCode,
+    Uri? namedAddress) : BackgroundService
 {
     private const string InviteName = "public-game-invite";
     private readonly HttpClient client = new(new SocketsHttpHandler { AllowAutoRedirect = false, UseProxy = false })
@@ -43,7 +44,7 @@ internal sealed partial class TunnelInvitePublisher(
                 var token = deadline.Token;
                 using var response = await client.GetAsync(endpoint.Url, HttpCompletionOption.ResponseHeadersRead, token);
                 if (response.StatusCode == HttpStatusCode.Found &&
-                    ParsePublicAddress(response.Headers.Location?.OriginalString) is { } address)
+                    ParsePublicAddress(response.Headers.Location?.OriginalString, namedAddress) is { } address)
                 {
                     var code = await gameCode.GetValueAsync(token);
                     if (!string.IsNullOrWhiteSpace(code))
@@ -86,9 +87,14 @@ internal sealed partial class TunnelInvitePublisher(
         Uri.TryCreate(input, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttp &&
         uri.IsLoopback && uri.UserInfo.Length == 0 && uri.PathAndQuery == "/" && uri.Fragment.Length == 0;
 
-    internal static Uri? ParsePublicAddress(string? input) =>
-        input is not null && PublicAddress().IsMatch(input) && Uri.TryCreate(input, UriKind.Absolute, out var uri)
+    internal static Uri? ParsePublicAddress(string? input, Uri? namedAddress = null)
+    {
+        if (namedAddress is not null)
+            return string.Equals(input, namedAddress.AbsoluteUri, StringComparison.Ordinal) ? namedAddress : null;
+
+        return input is not null && PublicAddress().IsMatch(input) && Uri.TryCreate(input, UriKind.Absolute, out var uri)
             ? uri : null;
+    }
 
     internal static string BuildInvite(Uri publicAddress, string code) =>
         publicAddress.AbsoluteUri + "#code=" + Uri.EscapeDataString(code);

@@ -1,7 +1,7 @@
 namespace Pongsole.Tunnel;
 
 internal sealed class TunnelService(ITunnelLauncher launcher, Uri origin, TimeProvider time,
-    IHostApplicationLifetime lifetime, TunnelExitStatus status, ILogger<TunnelService> logger)
+    IHostApplicationLifetime lifetime, TunnelExitStatus status, ILogger<TunnelService> logger, NamedTunnel? named = null)
     : BackgroundService
 {
     private static readonly TimeSpan DiscoveryTimeout = TimeSpan.FromSeconds(60);
@@ -26,6 +26,8 @@ internal sealed class TunnelService(ITunnelLauncher launcher, Uri origin, TimePr
             using var readers = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
             using var discovery = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
             var found = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var connected = false;
+            var configured = false;
             lock (gate)
                 child = running;
 
@@ -42,14 +44,14 @@ internal sealed class TunnelService(ITunnelLauncher launcher, Uri origin, TimePr
                 if (first == timeout)
                 {
                     stoppingToken.ThrowIfCancellationRequested();
-                    throw new TimeoutException("cloudflared did not report a public address before the startup deadline.");
+                    throw new TimeoutException("cloudflared did not become ready before the startup deadline.");
                 }
 
                 await discovery.CancelAsync();
                 await WaitForMilestoneAsync(drains, exit);
                 var exitCode = await exit;
                 stoppingToken.ThrowIfCancellationRequested();
-                logger.LogError("cloudflared exited unexpectedly with code {ExitCode}. Restart the resource to open a new tunnel.", exitCode);
+                logger.LogError("cloudflared exited unexpectedly with code {ExitCode}. Restart the tunnel resource.", exitCode);
             }
             finally
             {
@@ -65,18 +67,30 @@ internal sealed class TunnelService(ITunnelLauncher launcher, Uri origin, TimePr
 
             void Observe(string line)
             {
-                if (TunnelAddress.ReadPublicAddress(line) is not { } address)
-                    return;
-
+                Uri? address;
                 lock (gate)
                 {
                     if (child != running || !running.IsRunning || publicAddress is not null || stoppingToken.IsCancellationRequested)
+                        return;
+
+                    if (named?.Address is { } stableAddress)
+                    {
+                        connected |= line.Contains(" INF Registered tunnel connection ", StringComparison.Ordinal);
+                        configured |= line.Contains(" INF Updated to new configuration ", StringComparison.Ordinal);
+                        address = connected && configured ? stableAddress : null;
+                    }
+                    else
+                    {
+                        address = TunnelAddress.ReadPublicAddress(line);
+                    }
+
+                    if (address is null)
                         return;
                     publicAddress = address;
                 }
 
                 found.TrySetResult();
-                logger.LogInformation("Quick Tunnel public homepage is {PublicAddress}", address.AbsoluteUri);
+                logger.LogInformation("Tunnel public homepage is {PublicAddress}", address.AbsoluteUri);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested || lifetime.ApplicationStopping.IsCancellationRequested)
@@ -85,7 +99,7 @@ internal sealed class TunnelService(ITunnelLauncher launcher, Uri origin, TimePr
         catch (Exception exception)
         {
             // Child output and exception text can include environmental details. Log only bounded diagnostics.
-            logger.LogError("Quick Tunnel failed ({FailureType}). Check the verified cloudflared cache and network, then restart the resource.",
+            logger.LogError("Tunnel failed ({FailureType}). Check the cloudflared configuration and network, then restart the resource.",
                 exception.GetType().Name);
         }
 
